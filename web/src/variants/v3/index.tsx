@@ -1,12 +1,19 @@
 /**
- * Variant 3: Notebook
+ * Variant 3: Clean Documentation / Knowledge Base
  *
- * Markdown-forward view with inline flowchart rendering and document-style navigation.
- * Shell file — to be implemented.
+ * GitBook/Notion-inspired: left sidebar with expandable categories,
+ * breadcrumb navigation, tabbed playbook viewer, clean white content area.
+ * Literata serif for reading, Inter for UI. Content is king.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { RouteMatch } from '../../router';
+import { usePlaybooks } from '../../hooks/usePlaybooks';
+import V3Layout from './V3Layout';
+import Dashboard from './pages/Dashboard';
+import Library from './pages/Library';
+import PlaybookViewer from './pages/PlaybookViewer';
+import Import from './pages/Import';
 
 interface V3AppProps {
   route: RouteMatch;
@@ -14,40 +21,79 @@ interface V3AppProps {
 }
 
 const V3App: React.FC<V3AppProps> = ({ route, onNavigate }) => {
+  const { playbooks } = usePlaybooks();
+
+  // Build playbook nav items for sidebar
+  const playbookNavItems = useMemo(
+    () =>
+      playbooks.map((pb) => ({
+        id: `pb-${pb.slug}`,
+        icon: '📄',
+        label: pb.metadata.title,
+        page: 'playbook',
+        slug: pb.slug,
+      })),
+    [playbooks]
+  );
+
+  // Build breadcrumbs based on current route
+  const breadcrumbs = useMemo(() => {
+    switch (route.page) {
+      case 'dashboard':
+      case 'home':
+        return [{ label: 'Overview' }];
+      case 'library':
+        return [{ label: 'Library' }];
+      case 'import':
+        return [{ label: 'Import' }];
+      case 'playbook': {
+        const pb = playbooks.find((p) => p.slug === route.params.slug);
+        return [
+          { label: 'Library', path: '#/3/library' },
+          { label: pb?.metadata.title || route.params.slug || 'Playbook' },
+        ];
+      }
+      default:
+        return [];
+    }
+  }, [route, playbooks]);
+
+  // Determine if content area should be wide
+  const isWide = route.page === 'dashboard';
+
+  // Render the active page
+  const renderPage = () => {
+    switch (route.page) {
+      case 'dashboard':
+      case 'home':
+        return <Dashboard />;
+      case 'library':
+        return <Library onNavigate={onNavigate} />;
+      case 'playbook':
+        return (
+          <PlaybookViewer
+            slug={route.params.slug}
+            onNavigate={onNavigate}
+          />
+        );
+      case 'import':
+        return <Import />;
+      default:
+        return <Dashboard />;
+    }
+  };
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0d1117', color: '#c9d1d9', padding: '2rem' }}>
-      <header style={{ marginBottom: '2rem' }}>
-        <button
-          onClick={() => onNavigate('#/')}
-          style={{ background: 'none', border: 'none', color: '#3fb950', cursor: 'pointer', fontSize: '0.9rem', padding: 0, marginBottom: '1rem', fontFamily: 'inherit' }}
-        >
-          ← Back to Variants
-        </button>
-        <h1 style={{ margin: 0, color: '#f0f6fc' }}>⚒️ Playbook Forge — Notebook</h1>
-        <p style={{ color: '#8b949e' }}>Variant 3 • {route.page} view</p>
-      </header>
-      <nav style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
-        {['home', 'library', 'import', 'dashboard'].map((p) => (
-          <button
-            key={p}
-            onClick={() => onNavigate(`#/3${p === 'home' ? '' : '/' + p}`)}
-            style={{
-              padding: '0.5rem 1rem', borderRadius: '6px',
-              border: route.page === p ? '2px solid #3fb950' : '1px solid #30363d',
-              background: route.page === p ? '#3fb95022' : '#161b22',
-              color: route.page === p ? '#3fb950' : '#8b949e',
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.9rem', textTransform: 'capitalize',
-            }}
-          >
-            {p}
-          </button>
-        ))}
-      </nav>
-      <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '2rem', textAlign: 'center' }}>
-        <p style={{ color: '#8b949e', fontSize: '1.1rem' }}>🚧 Variant 3 (Notebook) — Coming Soon</p>
-        <p style={{ color: '#484f58' }}>Current route: {route.path}{route.params.slug && ` | slug: ${route.params.slug}`}</p>
-      </div>
-    </div>
+    <V3Layout
+      activePage={route.page}
+      activeSlug={route.params.slug}
+      onNavigate={onNavigate}
+      playbookNavItems={playbookNavItems}
+      breadcrumbs={breadcrumbs}
+      wide={isWide}
+    >
+      {renderPage()}
+    </V3Layout>
   );
 };
 

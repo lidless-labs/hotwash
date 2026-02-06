@@ -1,0 +1,238 @@
+/**
+ * V3 Import — Clean Import Form
+ */
+
+.v3-import {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.v3-import-header {
+  margin-bottom: 28px;
+}
+
+.v3-import-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.v3-import-subtitle {
+  font-size: 15px;
+  color: #64748B;
+  margin: 0;
+  font-family: 'Literata', Georgia, serif;
+}
+
+/* ============================================================
+   INPUT AREA
+   ============================================================ */
+
+.v3-input-section {
+  margin-bottom: 24px;
+}
+
+.v3-input-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.v3-input-label-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.v3-input-stats {
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.v3-textarea-wrapper {
+  position: relative;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.v3-textarea-wrapper:focus-within {
+  border-color: #4F46E5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.v3-import-textarea {
+  width: 100%;
+  min-height: 260px;
+  padding: 16px 20px;
+  border: none;
+  background: #1E293B;
+  color: #E2E8F0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.v3-import-textarea::placeholder {
+  color: #64748B;
+}
+
+/* ============================================================
+   ACTION BUTTONS
+   ============================================================ */
+
+.v3-import-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.v3-btn {
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.v3-btn--primary {
+  background: #4F46E5;
+  color: #FFFFFF;
+  border-color: #4F46E5;
+}
+
+.v3-btn--primary:hover {
+  background: #4338CA;
+  border-color: #4338CA;
+}
+
+.v3-btn--primary:disabled {
+  background: #C7D2FE;
+  border-color: #C7D2FE;
+  cursor: not-allowed;
+}
+
+.v3-btn--secondary {
+  background: #FFFFFF;
+  color: #64748B;
+  border-color: #E2E8F0;
+}
+
+.v3-btn--secondary:hover {
+  border-color: #CBD5E1;
+  color: #1E293B;
+}
+
+/* ============================================================
+   PARSE RESULTS
+   ============================================================ */
+
+.v3-parse-results {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.v3-parse-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: #F0FDF4;
+  border-bottom: 1px solid #BBF7D0;
+}
+
+.v3-parse-results-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v3-parse-results-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16A34A;
+}
+
+.v3-parse-results-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #166534;
+}
+
+.v3-parse-results-time {
+  font-size: 12px;
+  color: #16A34A;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Errors/Warnings */
+.v3-parse-warnings {
+  padding: 12px 20px;
+  background: #FFFBEB;
+  border-bottom: 1px solid #FDE68A;
+}
+
+.v3-parse-warnings-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400E;
+  margin-bottom: 6px;
+}
+
+.v3-parse-warnings-list {
+  margin: 0;
+  padding: 0 0 0 20px;
+  font-size: 12px;
+  color: #92400E;
+  line-height: 1.6;
+}
+
+/* Stats row */
+.v3-parse-stats {
+  display: flex;
+  gap: 24px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.v3-parse-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.v3-parse-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.v3-parse-stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Flow result */
+.v3-parse-flow {
+  height: 400px;
+}
+
+.v3-parse-flow .flow-canvas {
+  height: 100%;
+}

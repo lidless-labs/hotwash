@@ -1,0 +1,280 @@
+/**
+ * V3 Dashboard — Clean Documentation Stats
+ */
+
+.v3-dashboard {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.v3-dashboard-header {
+  margin-bottom: 32px;
+}
+
+.v3-dashboard-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.v3-dashboard-subtitle {
+  font-size: 15px;
+  color: #64748B;
+  margin: 0;
+  font-family: 'Literata', Georgia, serif;
+}
+
+/* ============================================================
+   STATS CARDS ROW
+   ============================================================ */
+
+.v3-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.v3-stat-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 20px;
+  transition: box-shadow 0.15s ease;
+}
+
+.v3-stat-card:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.v3-stat-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.v3-stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.v3-stat-meta {
+  font-size: 12px;
+  color: #94A3B8;
+  margin-top: 6px;
+}
+
+.v3-stat-accent {
+  color: #4F46E5;
+}
+
+/* ============================================================
+   COVERAGE SECTION
+   ============================================================ */
+
+.v3-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
+}
+
+.v3-coverage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+/* Category coverage card */
+.v3-coverage-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.v3-coverage-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 0 0 16px;
+}
+
+.v3-coverage-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.v3-coverage-item:last-child {
+  border-bottom: none;
+}
+
+.v3-coverage-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.v3-coverage-indicator--active {
+  background: #16A34A;
+}
+
+.v3-coverage-indicator--inactive {
+  background: #E2E8F0;
+}
+
+.v3-coverage-label {
+  flex: 1;
+  font-size: 13px;
+  color: #1E293B;
+}
+
+.v3-coverage-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748B;
+  min-width: 24px;
+  text-align: right;
+}
+
+.v3-coverage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4F46E5;
+  background: #EEF2FF;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Node composition card */
+.v3-composition-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.v3-composition-bar-row:last-child {
+  border-bottom: none;
+}
+
+.v3-composition-bar-label {
+  font-size: 13px;
+  color: #1E293B;
+  min-width: 72px;
+}
+
+.v3-composition-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #F1F5F9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.v3-composition-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.v3-composition-bar-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748B;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ============================================================
+   PLAYBOOK LIST SECTION
+   ============================================================ */
+
+.v3-playbook-list {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.v3-playbook-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.v3-playbook-list-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 0;
+}
+
+.v3-playbook-list-count {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.v3-playbook-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #F8FAFC;
+  font-size: 13px;
+}
+
+.v3-playbook-list-item:last-child {
+  border-bottom: none;
+}
+
+.v3-playbook-list-title {
+  flex: 1;
+  color: #1E293B;
+  font-weight: 500;
+}
+
+.v3-playbook-list-type {
+  color: #64748B;
+  font-size: 12px;
+}
+
+.v3-playbook-list-nodes {
+  color: #94A3B8;
+  font-size: 12px;
+  min-width: 80px;
+  text-align: right;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .v3-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .v3-coverage-grid {
+    grid-template-columns: 1fr;
+  }
+}

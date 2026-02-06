@@ -1,0 +1,375 @@
+/**
+ * V3 PlaybookViewer — Tabbed Content View
+ */
+
+.v3-viewer {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ============================================================
+   VIEWER HEADER
+   ============================================================ */
+
+.v3-viewer-header {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.v3-viewer-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0 0 10px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.v3-viewer-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.v3-viewer-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #64748B;
+}
+
+.v3-viewer-meta-icon {
+  font-size: 14px;
+}
+
+.v3-viewer-meta-divider {
+  width: 1px;
+  height: 14px;
+  background: #E2E8F0;
+}
+
+.v3-viewer-tags {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.v3-viewer-tag {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4F46E5;
+  background: #EEF2FF;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   TAB BAR
+   ============================================================ */
+
+.v3-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #E2E8F0;
+  margin-bottom: 24px;
+}
+
+.v3-tab {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748B;
+  position: relative;
+  transition: color 0.15s ease;
+}
+
+.v3-tab:hover {
+  color: #1E293B;
+}
+
+.v3-tab--active {
+  color: #4F46E5;
+}
+
+.v3-tab--active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #4F46E5;
+  border-radius: 1px;
+}
+
+/* ============================================================
+   TAB CONTENT: CONTENT VIEW
+   ============================================================ */
+
+.v3-content-view {
+  font-family: 'Literata', Georgia, serif;
+}
+
+.v3-content-view .md-renderer {
+  color: #1E293B;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.v3-content-view .md-renderer h1 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 32px 0 12px;
+  letter-spacing: -0.02em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.v3-content-view .md-renderer h2 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 28px 0 10px;
+  letter-spacing: -0.01em;
+}
+
+.v3-content-view .md-renderer h3 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 24px 0 8px;
+}
+
+.v3-content-view .md-renderer p {
+  margin: 0 0 16px;
+  color: #334155;
+}
+
+.v3-content-view .md-renderer ul,
+.v3-content-view .md-renderer ol {
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+
+.v3-content-view .md-renderer li {
+  margin-bottom: 6px;
+  color: #334155;
+}
+
+.v3-content-view .md-renderer code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  background: #F1F5F9;
+  color: #4F46E5;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.v3-content-view .md-renderer pre {
+  background: #1E293B;
+  color: #E2E8F0;
+  padding: 16px 20px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+  position: relative;
+}
+
+.v3-content-view .md-renderer pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.v3-content-view .md-renderer pre .code-lang {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.v3-content-view .md-renderer blockquote {
+  border-left: 3px solid #4F46E5;
+  padding: 8px 16px;
+  margin: 0 0 16px;
+  background: #EEF2FF;
+  border-radius: 0 6px 6px 0;
+}
+
+.v3-content-view .md-renderer blockquote p {
+  color: #4338CA;
+  margin: 0;
+}
+
+.v3-content-view .md-renderer hr {
+  border: none;
+  border-top: 1px solid #E2E8F0;
+  margin: 24px 0;
+}
+
+.v3-content-view .md-renderer strong {
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.v3-content-view .md-renderer table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+
+.v3-content-view .md-renderer th {
+  text-align: left;
+  padding: 10px 12px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  color: #1E293B;
+  font-size: 13px;
+}
+
+.v3-content-view .md-renderer td {
+  padding: 10px 12px;
+  border: 1px solid #E2E8F0;
+  color: #334155;
+}
+
+.v3-content-view .md-renderer a {
+  color: #4F46E5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.v3-content-view .md-renderer a:hover {
+  color: #4338CA;
+}
+
+/* ============================================================
+   TAB CONTENT: FLOWCHART VIEW
+   ============================================================ */
+
+.v3-flowchart-view {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 520px;
+}
+
+.v3-flowchart-view .flow-canvas {
+  height: 100%;
+}
+
+/* ============================================================
+   TAB CONTENT: RAW VIEW
+   ============================================================ */
+
+.v3-raw-view {
+  position: relative;
+}
+
+.v3-raw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.v3-raw-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.v3-raw-copy-btn {
+  padding: 5px 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  background: #FFFFFF;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v3-raw-copy-btn:hover {
+  border-color: #CBD5E1;
+  color: #1E293B;
+}
+
+.v3-raw-copy-btn--copied {
+  background: #F0FDF4;
+  border-color: #BBF7D0;
+  color: #16A34A;
+}
+
+.v3-raw-content {
+  background: #1E293B;
+  color: #E2E8F0;
+  padding: 20px 24px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+/* ============================================================
+   NOT FOUND STATE
+   ============================================================ */
+
+.v3-viewer-notfound {
+  text-align: center;
+  padding: 48px 24px;
+  color: #94A3B8;
+  font-size: 15px;
+  font-family: 'Literata', Georgia, serif;
+}
+
+.v3-viewer-notfound-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.v3-viewer-notfound-link {
+  color: #4F46E5;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.v3-viewer-notfound-link:hover {
+  color: #4338CA;
+}
