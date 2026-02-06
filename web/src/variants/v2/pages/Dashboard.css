@@ -1,0 +1,365 @@
+/**
+ * V2 Dashboard — Multi-widget SOC grid
+ */
+
+/* ============================================================
+   PAGE HEADER
+   ============================================================ */
+
+.v2-page-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.v2-page-header h1 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #E2E8F0;
+  margin: 0;
+}
+
+.v2-page-subtitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #475569;
+  letter-spacing: 0.5px;
+}
+
+/* ============================================================
+   KPI ROW
+   ============================================================ */
+
+.v2-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.v2-kpi-card {
+  background: #162035;
+  border: 1px solid #1E3050;
+  border-radius: 6px;
+  padding: 14px 16px;
+  border-left: 3px solid #1E3050;
+}
+
+.v2-kpi-card--cyan { border-left-color: #06B6D4; }
+.v2-kpi-card--green { border-left-color: #22C55E; }
+.v2-kpi-card--amber { border-left-color: #F59E0B; }
+.v2-kpi-card--red { border-left-color: #EF4444; }
+
+.v2-kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: #E2E8F0;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.v2-kpi-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #64748B;
+  margin-bottom: 8px;
+}
+
+.v2-kpi-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #22C55E;
+}
+
+.v2-kpi-indicator .v2-status-dot {
+  width: 5px;
+  height: 5px;
+}
+
+/* ============================================================
+   WIDGET GRID
+   ============================================================ */
+
+.v2-widget-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.v2-widget {
+  background: #162035;
+  border: 1px solid #1E3050;
+  border-radius: 6px;
+  padding: 14px 16px;
+  border-left: 3px solid #1E3050;
+}
+
+.v2-widget--coverage { border-left-color: #06B6D4; }
+.v2-widget--nodes { border-left-color: #22C55E; }
+.v2-widget--inventory {
+  border-left-color: #F59E0B;
+  grid-column: 1 / -1;
+}
+.v2-widget--health { border-left-color: #22C55E; grid-column: 1 / -1; }
+
+.v2-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1E3050;
+}
+
+.v2-widget-header h3 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #94A3B8;
+  margin: 0;
+}
+
+.v2-widget-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #06B6D4;
+  background: #0B1E33;
+  border: 1px solid #1E3050;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.v2-widget-badge--green {
+  color: #22C55E;
+  background: #0B2618;
+}
+
+/* ============================================================
+   COVERAGE LIST
+   ============================================================ */
+
+.v2-coverage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.v2-coverage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.v2-coverage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1E3050;
+  border: 1px solid #2D4060;
+  flex-shrink: 0;
+}
+
+.v2-coverage-dot--active {
+  background: #22C55E;
+  border-color: #22C55E;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.4);
+}
+
+.v2-coverage-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #94A3B8;
+  flex: 1;
+}
+
+.v2-coverage-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #E2E8F0;
+  min-width: 20px;
+  text-align: right;
+}
+
+/* ============================================================
+   NODE BAR CHART
+   ============================================================ */
+
+.v2-node-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.v2-node-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v2-node-bar-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 80px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #94A3B8;
+}
+
+.v2-node-bar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.v2-node-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #0B1426;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.v2-node-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.v2-node-bar-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #E2E8F0;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* ============================================================
+   INVENTORY TABLE
+   ============================================================ */
+
+.v2-inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.v2-inventory-table thead th {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #475569;
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #1E3050;
+}
+
+.v2-inventory-table tbody tr {
+  border-bottom: 1px solid #1E305040;
+  transition: background 0.1s;
+}
+
+.v2-inventory-table tbody tr:hover {
+  background: #1C2A45;
+}
+
+.v2-inventory-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.v2-inventory-title {
+  color: #E2E8F0;
+  font-weight: 500;
+}
+
+.v2-inventory-type {
+  color: #64748B;
+  font-size: 10px;
+}
+
+.v2-inventory-num {
+  text-align: center;
+  color: #94A3B8;
+  font-weight: 600;
+}
+
+/* ============================================================
+   SYSTEM HEALTH
+   ============================================================ */
+
+.v2-health-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.v2-health-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0B1426;
+  border: 1px solid #1E3050;
+  border-radius: 4px;
+}
+
+.v2-health-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #94A3B8;
+  flex: 1;
+}
+
+.v2-health-detail {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #64748B;
+}
+
+/* Shared status dots from layout are reused here */
+.v2-dashboard .v2-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .v2-kpi-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .v2-widget-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .v2-widget--inventory {
+    grid-column: auto;
+  }
+}

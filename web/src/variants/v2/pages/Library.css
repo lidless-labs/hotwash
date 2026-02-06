@@ -1,0 +1,224 @@
+/**
+ * V2 Library — Dense sortable table
+ */
+
+/* ============================================================
+   FILTER ROW
+   ============================================================ */
+
+.v2-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.v2-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: #162035;
+  border: 1px solid #1E3050;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #94A3B8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v2-filter-chip:hover {
+  background: #1C2A45;
+  border-color: #2D4060;
+}
+
+.v2-filter-chip--active {
+  background: #0B1E33;
+  border-color: #06B6D4;
+  color: #E2E8F0;
+}
+
+.v2-filter-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+
+.v2-table-wrapper {
+  overflow-x: auto;
+}
+
+.v2-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.v2-library-table thead th {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #475569;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #1E3050;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.v2-th-sortable {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.v2-th-sortable:hover {
+  color: #06B6D4 !important;
+}
+
+.v2-th-num {
+  text-align: center !important;
+  min-width: 60px;
+}
+
+.v2-th-status {
+  width: 24px;
+  text-align: center !important;
+  font-size: 6px !important;
+  color: #22C55E !important;
+}
+
+.v2-th-tags {
+  min-width: 120px;
+}
+
+/* ============================================================
+   TABLE ROWS
+   ============================================================ */
+
+.v2-lib-row {
+  border-bottom: 1px solid #1E305040;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.v2-lib-row:hover {
+  background: #1C2A45;
+}
+
+.v2-lib-row td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.v2-td-status {
+  width: 24px;
+  text-align: center;
+}
+
+.v2-td-title {
+  max-width: 280px;
+}
+
+.v2-td-title-text {
+  color: #E2E8F0;
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v2-td-title-desc {
+  color: #475569;
+  font-size: 10px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v2-td-type {
+  color: #64748B;
+  font-size: 10px;
+}
+
+.v2-td-num {
+  text-align: center;
+  color: #94A3B8;
+  font-weight: 600;
+}
+
+.v2-td-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ============================================================
+   BADGES & TAGS
+   ============================================================ */
+
+.v2-category-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid;
+  border-radius: 3px;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.v2-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #64748B;
+  background: #0B1426;
+  border: 1px solid #1E3050;
+  padding: 1px 5px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.v2-tag--more {
+  color: #475569;
+  font-style: italic;
+}
+
+/* ============================================================
+   EMPTY STATE
+   ============================================================ */
+
+.v2-library-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: #64748B;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  justify-content: center;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .v2-th-tags,
+  .v2-td-tags,
+  .v2-td-title-desc {
+    display: none;
+  }
+}
