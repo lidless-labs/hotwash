@@ -82,3 +82,6 @@ build/
 .coverage
 htmlcov/
 coverage/
+
+FRONTEND_DESIGN.md
+POLISH_NOTES.md
