@@ -6,7 +6,8 @@
  * Academic research paper aesthetic. Printable.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import GuidedTour, { resetTour } from '../../components/GuidedTour';
 import './V5Layout.css';
 
 interface V5LayoutProps {
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Summary', page: 'dashboard' },
   { id: 'library', label: 'Bibliography', page: 'library' },
   { id: 'import', label: 'Submit', page: 'import' },
+  { id: 'docs', label: 'Reference', page: 'docs' },
 ];
 
 const V5Layout: React.FC<V5LayoutProps> = ({
@@ -27,6 +29,13 @@ const V5Layout: React.FC<V5LayoutProps> = ({
   onNavigate,
   children,
 }) => {
+  const [tourActive, setTourActive] = useState(false);
+
+  const handleTakeTour = () => {
+    resetTour();
+    setTourActive(true);
+  };
+
   const isActive = (page: string) =>
     activePage === page || (page === 'dashboard' && activePage === 'home');
 
@@ -48,6 +57,7 @@ const V5Layout: React.FC<V5LayoutProps> = ({
                 key={item.id}
                 className={`v5-nav-link ${isActive(item.page) ? 'v5-nav-link--active' : ''}`}
                 onClick={() => onNavigate(`#/5/${item.page}`)}
+                data-tour={item.id}
               >
                 {item.label}
               </button>
@@ -56,7 +66,16 @@ const V5Layout: React.FC<V5LayoutProps> = ({
 
           <button
             className="v5-nav-back"
+            onClick={handleTakeTour}
+            style={{ marginLeft: 0 }}
+          >
+            Tour
+          </button>
+
+          <button
+            className="v5-nav-back"
             onClick={() => onNavigate('#/')}
+            data-tour="variant-back"
           >
             Variants
           </button>
@@ -79,6 +98,12 @@ const V5Layout: React.FC<V5LayoutProps> = ({
           <span>{new Date().getFullYear()}</span>
         </div>
       </footer>
+
+      {/* Guided Tour */}
+      <GuidedTour
+        forceStart={tourActive}
+        onComplete={() => setTourActive(false)}
+      />
     </div>
   );
 };

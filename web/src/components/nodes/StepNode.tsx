@@ -18,7 +18,7 @@ interface StepNodeProps {
 
 const StepNode: React.FC<StepNodeProps> = ({ data }) => {
   return (
-    <div className="custom-node step-node">
+    <div className="custom-node step-node" data-tour="step-details">
       <Handle type="target" position={Position.Top} className="node-handle" />
       <div className="node-icon">▶️</div>
       <div className="node-content">

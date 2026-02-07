@@ -7,9 +7,10 @@
  * - Dense content area
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { usePlaybooks } from '../../hooks/usePlaybooks';
 import { STATUS_BAR_TEXT } from './theme';
+import GuidedTour, { resetTour } from '../../components/GuidedTour';
 import './V2Layout.css';
 
 interface V2LayoutProps {
@@ -32,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', icon: '◈', label: 'Dashboard', page: 'dashboard' },
   { id: 'library', icon: '☰', label: 'Library', page: 'library' },
   { id: 'import', icon: '⌨', label: 'Import', page: 'import' },
+  { id: 'docs', icon: '?', label: 'Docs', page: 'docs' },
 ];
 
 const V2Layout: React.FC<V2LayoutProps> = ({
@@ -45,6 +47,13 @@ const V2Layout: React.FC<V2LayoutProps> = ({
   const coveragePercent = categories.length > 0
     ? Math.round((categories.length / 6) * 100)
     : 0;
+
+  const [tourActive, setTourActive] = useState(false);
+
+  const handleTakeTour = () => {
+    resetTour();
+    setTourActive(true);
+  };
 
   const isActive = (item: NavItem) =>
     activePage === item.page || (item.page === 'dashboard' && activePage === 'home');
@@ -98,6 +107,7 @@ const V2Layout: React.FC<V2LayoutProps> = ({
                 className={`v2-nav-btn ${isActive(item) ? 'v2-nav-btn--active' : ''}`}
                 onClick={() => onNavigate(`#/2/${item.page}`)}
                 title={item.label}
+                data-tour={item.id}
               >
                 <span className="v2-nav-icon">{item.icon}</span>
                 <span className="v2-nav-label">{item.label}</span>
@@ -107,8 +117,19 @@ const V2Layout: React.FC<V2LayoutProps> = ({
 
           <button
             className="v2-sidebar-back"
+            onClick={handleTakeTour}
+            title="Take Guided Tour"
+            style={{ borderTop: 'none' }}
+          >
+            <span className="v2-nav-icon">?</span>
+            <span className="v2-nav-label">Tour</span>
+          </button>
+
+          <button
+            className="v2-sidebar-back"
             onClick={() => onNavigate('#/')}
             title="Back to Variants"
+            data-tour="variant-back"
           >
             <span className="v2-nav-icon">◄</span>
             <span className="v2-nav-label">Exit</span>
@@ -120,6 +141,12 @@ const V2Layout: React.FC<V2LayoutProps> = ({
           {children}
         </main>
       </div>
+
+      {/* Guided Tour */}
+      <GuidedTour
+        forceStart={tourActive}
+        onComplete={() => setTourActive(false)}
+      />
     </div>
   );
 };

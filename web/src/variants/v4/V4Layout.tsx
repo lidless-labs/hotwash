@@ -6,7 +6,8 @@
  * Everything feels like reading an architectural drawing or engineering schematic.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import GuidedTour, { resetTour } from '../../components/GuidedTour';
 import './V4Layout.css';
 
 interface V4LayoutProps {
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'OVERVIEW', page: 'dashboard' },
   { id: 'library', label: 'PARTS CATALOG', page: 'library' },
   { id: 'import', label: 'NEW SCHEMATIC', page: 'import' },
+  { id: 'docs', label: 'DOCUMENTATION', page: 'docs' },
 ];
 
 const V4Layout: React.FC<V4LayoutProps> = ({
@@ -38,6 +40,13 @@ const V4Layout: React.FC<V4LayoutProps> = ({
   titleBlockData,
   children,
 }) => {
+  const [tourActive, setTourActive] = useState(false);
+
+  const handleTakeTour = () => {
+    resetTour();
+    setTourActive(true);
+  };
+
   const isActive = (page: string) =>
     activePage === page || (page === 'dashboard' && activePage === 'home');
 
@@ -88,6 +97,7 @@ const V4Layout: React.FC<V4LayoutProps> = ({
                 key={item.id}
                 className={`v4-nav-btn ${isActive(item.page) ? 'v4-nav-btn--active' : ''}`}
                 onClick={() => onNavigate(`#/4/${item.page}`)}
+                data-tour={item.id}
               >
                 {item.label}
               </button>
@@ -95,8 +105,16 @@ const V4Layout: React.FC<V4LayoutProps> = ({
           </div>
 
           <button
+            className="v4-nav-btn"
+            onClick={handleTakeTour}
+          >
+            ? TOUR
+          </button>
+
+          <button
             className="v4-topbar-back"
             onClick={() => onNavigate('#/')}
+            data-tour="variant-back"
           >
             ← VARIANTS
           </button>
@@ -158,6 +176,12 @@ const V4Layout: React.FC<V4LayoutProps> = ({
           )}
         </div>
       </div>
+
+      {/* Guided Tour */}
+      <GuidedTour
+        forceStart={tourActive}
+        onComplete={() => setTourActive(false)}
+      />
     </div>
   );
 };

@@ -9,6 +9,7 @@
  *   /N/playbook/:slug → View specific playbook
  *   /N/import      → Import/paste markdown
  *   /N/dashboard   → Statistics dashboard
+ *   /N/docs        → In-app documentation
  */
 
 export interface RouteMatch {
@@ -16,7 +17,7 @@ export interface RouteMatch {
   path: string;
   /** Variant number 1-5 or null for root */
   variant: number | null;
-  /** Page identifier: 'picker' | 'home' | 'library' | 'playbook' | 'import' | 'dashboard' */
+  /** Page identifier: 'picker' | 'home' | 'library' | 'playbook' | 'import' | 'dashboard' | 'docs' */
   page: string;
   /** Dynamic parameters (e.g., { slug: 'vulnerability-remediation-python' }) */
   params: Record<string, string>;
@@ -62,6 +63,11 @@ export function matchRoute(hash: string): RouteMatch {
   // /N/dashboard
   if (rest === 'dashboard') {
     return { path, variant, page: 'dashboard', params: {} };
+  }
+
+  // /N/docs
+  if (rest === 'docs') {
+    return { path, variant, page: 'docs', params: {} };
   }
 
   // /N/playbook/:slug

@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard';
 import Library from './pages/Library';
 import PlaybookViewer from './pages/PlaybookViewer';
 import Import from './pages/Import';
+import DocsPage from '../../pages/DocsPage';
 
 interface V3AppProps {
   route: RouteMatch;
@@ -46,6 +47,8 @@ const V3App: React.FC<V3AppProps> = ({ route, onNavigate }) => {
         return [{ label: 'Library' }];
       case 'import':
         return [{ label: 'Import' }];
+      case 'docs':
+        return [{ label: 'Documentation' }];
       case 'playbook': {
         const pb = playbooks.find((p) => p.slug === route.params.slug);
         return [
@@ -78,6 +81,8 @@ const V3App: React.FC<V3AppProps> = ({ route, onNavigate }) => {
         );
       case 'import':
         return <Import />;
+      case 'docs':
+        return <DocsPage />;
       default:
         return <Dashboard />;
     }

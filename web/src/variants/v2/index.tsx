@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Library from './pages/Library';
 import PlaybookViewer from './pages/PlaybookViewer';
 import Import from './pages/Import';
+import DocsPage from '../../pages/DocsPage';
 
 interface V2AppProps {
   route: RouteMatch;
@@ -35,6 +36,8 @@ const V2App: React.FC<V2AppProps> = ({ route, onNavigate }) => {
         );
       case 'import':
         return <Import />;
+      case 'docs':
+        return <DocsPage />;
       default:
         return <Dashboard />;
     }

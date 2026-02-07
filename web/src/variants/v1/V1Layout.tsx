@@ -7,8 +7,9 @@
  * - Main content area
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { CLASSIFICATION_TEXT } from './theme';
+import GuidedTour, { resetTour } from '../../components/GuidedTour';
 import './V1Layout.css';
 
 interface NavItem {
@@ -37,6 +38,7 @@ const CORE_NAV: NavItem[] = [
   { id: 'dashboard', number: '1.0', label: 'Executive Summary', page: 'dashboard' },
   { id: 'library', number: '2.0', label: 'Playbook Library', page: 'library' },
   { id: 'import', number: '3.0', label: 'Import / Parse', page: 'import' },
+  { id: 'docs', number: '4.0', label: 'Documentation', page: 'docs' },
 ];
 
 const V1Layout: React.FC<V1LayoutProps> = ({
@@ -46,6 +48,13 @@ const V1Layout: React.FC<V1LayoutProps> = ({
   extraNavItems = [],
   children,
 }) => {
+  const [tourActive, setTourActive] = useState(false);
+
+  const handleTakeTour = () => {
+    resetTour();
+    setTourActive(true);
+  };
+
   const getNavPath = (item: NavItem) => {
     if (item.slug) return `#/1/playbook/${item.slug}`;
     return `#/1/${item.page}`;
@@ -80,6 +89,7 @@ const V1Layout: React.FC<V1LayoutProps> = ({
                   key={item.id}
                   className={`v1-nav-item ${isActive(item) ? 'v1-nav-item--active' : ''}`}
                   onClick={() => onNavigate(getNavPath(item))}
+                  data-tour={item.id}
                 >
                   <span className="v1-nav-number">{item.number}</span>
                   <span className="v1-nav-label">{item.label}</span>
@@ -105,10 +115,20 @@ const V1Layout: React.FC<V1LayoutProps> = ({
             )}
           </nav>
 
+          {/* Take Tour */}
+          <button
+            className="v1-sidebar-back"
+            onClick={handleTakeTour}
+            style={{ borderTop: 'none' }}
+          >
+            ❓ Take Guided Tour
+          </button>
+
           {/* Back to variants */}
           <button
             className="v1-sidebar-back"
             onClick={() => onNavigate('#/')}
+            data-tour="variant-back"
           >
             ◄ Return to Variant Selection
           </button>
@@ -124,6 +144,12 @@ const V1Layout: React.FC<V1LayoutProps> = ({
       <div className="v1-classification-banner v1-classification-banner--bottom">
         {CLASSIFICATION_TEXT}
       </div>
+
+      {/* Guided Tour */}
+      <GuidedTour
+        forceStart={tourActive}
+        onComplete={() => setTourActive(false)}
+      />
     </div>
   );
 };

@@ -250,7 +250,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({ graph, theme, customNodeTypes }
   );
 
   return (
-    <div className="flow-canvas">
+    <div className="flow-canvas" data-tour="flow-canvas">
       <ReactFlow
         nodes={nodes}
         edges={edges}

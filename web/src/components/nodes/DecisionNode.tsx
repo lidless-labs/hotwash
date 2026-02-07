@@ -18,7 +18,7 @@ interface DecisionNodeProps {
 
 const DecisionNode: React.FC<DecisionNodeProps> = ({ data }) => {
   return (
-    <div className="custom-node decision-node">
+    <div className="custom-node decision-node" data-tour="decision-node">
       <Handle type="target" position={Position.Top} className="node-handle" />
       <div className="node-icon">❓</div>
       <div className="node-content">

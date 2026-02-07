@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import GuidedTour, { resetTour } from '../../components/GuidedTour';
 import './V3Layout.css';
 
 interface NavItem {
@@ -41,6 +42,7 @@ const CORE_NAV: NavItem[] = [
   { id: 'dashboard', icon: '📊', label: 'Overview', page: 'dashboard' },
   { id: 'library', icon: '📚', label: 'Library', page: 'library' },
   { id: 'import', icon: '📝', label: 'Import', page: 'import' },
+  { id: 'docs', icon: '📖', label: 'Documentation', page: 'docs' },
 ];
 
 const V3Layout: React.FC<V3LayoutProps> = ({
@@ -53,6 +55,12 @@ const V3Layout: React.FC<V3LayoutProps> = ({
   children,
 }) => {
   const [playbooksExpanded, setPlaybooksExpanded] = useState(true);
+  const [tourActive, setTourActive] = useState(false);
+
+  const handleTakeTour = () => {
+    resetTour();
+    setTourActive(true);
+  };
 
   const getNavPath = (item: NavItem) => {
     if (item.slug) return `#/3/playbook/${item.slug}`;
@@ -88,6 +96,7 @@ const V3Layout: React.FC<V3LayoutProps> = ({
                   key={item.id}
                   className={`v3-nav-item ${isActive(item) ? 'v3-nav-item--active' : ''}`}
                   onClick={() => onNavigate(getNavPath(item))}
+                  data-tour={item.id}
                 >
                   <span className="v3-nav-item-icon">{item.icon}</span>
                   <span className="v3-nav-item-label">{item.label}</span>
@@ -125,10 +134,20 @@ const V3Layout: React.FC<V3LayoutProps> = ({
             )}
           </nav>
 
+          {/* Take Tour */}
+          <button
+            className="v3-sidebar-back"
+            onClick={handleTakeTour}
+            style={{ borderTop: 'none' }}
+          >
+            ❓ Take Guided Tour
+          </button>
+
           {/* Back to variants */}
           <button
             className="v3-sidebar-back"
             onClick={() => onNavigate('#/')}
+            data-tour="variant-back"
           >
             ← Back to Variants
           </button>
@@ -169,6 +188,12 @@ const V3Layout: React.FC<V3LayoutProps> = ({
           </div>
         </main>
       </div>
+
+      {/* Guided Tour */}
+      <GuidedTour
+        forceStart={tourActive}
+        onComplete={() => setTourActive(false)}
+      />
     </div>
   );
 };
