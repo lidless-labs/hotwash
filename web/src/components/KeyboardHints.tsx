@@ -80,7 +80,7 @@ export const KeyboardHints: React.FC<KeyboardHintsProps> = ({
             fontFamily: 'monospace',
             zIndex: 10001,
             pointerEvents: 'none',
-            animation: kbhFadeIn 0.15s ease-out',
+            animation: 'kbhFadeIn 0.15s ease-out',
           }}
         >
           {toast}
@@ -141,7 +141,7 @@ export const KeyboardHints: React.FC<KeyboardHintsProps> = ({
               minWidth: 200,
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
               backdropFilter: 'blur(12px)',
-              animation: kbhSlideUp 0.15s ease-out',
+              animation: 'kbhSlideUp 0.15s ease-out',
             }}
           >
             <div
