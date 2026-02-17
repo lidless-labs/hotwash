@@ -1,66 +1,78 @@
-# Nightshift Work Projects
+# CLAUDE.md
 
-## CRITICAL: Git Commit Rules
+## Project
+- **Name:** Playbook Forge
+- **Stack:** React 18, TypeScript, Vite, React Flow, FastAPI (optional backend)
+- **Root:** This directory
+- **Deploy:** Caddy static (serves `web/dist/`)
 
-**NEVER DO:**
-- Never add "Co-Authored-By" lines to commit messages
-- Never use noreply@anthropic.com or any Anthropic/Claude email
-- Never mention "Claude", "AI", "clawdbot", "Anthropic" in commit messages
-- Never sign commits with AI attribution of any kind
+## Architecture
+- Frontend: `web/` (React 18 + TypeScript + Vite + React Flow)
+- Backend: `api/` (FastAPI, if present)
+- Entry: `web/src/main.tsx`
 
-**ALWAYS DO:**
-- Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `perf:`
-- Write commit messages as if a human developer wrote them
-- Focus on WHAT changed and WHY (security fix, UX improvement, performance, etc.)
-- Keep messages concise and professional
-
-**Example good commits:**
-```
-feat: add dark mode toggle to settings page
-fix: prevent XSS in user input sanitization
-refactor: extract validation logic to separate module
-chore: update dependencies to latest versions
-```
-
-**Example BAD commits (NEVER DO THIS):**
-```
-chore: initial setup
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-```
-
-## Before Finishing Work
-
-Always verify clean history before marking tasks complete:
+## Build & Test
 ```bash
-git log --format="%B" | grep -i "co-authored"
+cd web && npm install && npm run dev      # Dev server
+cd web && npm run build                    # Build to web/dist/
 ```
 
-If any are found, they MUST be removed before the work is considered done.
+## Key Files
+- `web/src/App.tsx` - React entry
+- `web/src/` - All frontend source
 
-## CRITICAL: Frontend Design Standards
+## Gotchas
+- **Frontend is in `web/`**, not root. Build output is `web/dist/`.
+- **React Flow** for visual workflow/playbook editing.
 
+## Style Guide
+- Dark theme
+- No em dashes. Ever.
 
-**No AI Slop.** Every UI you create should be exceptional, not generic.
+## DO NOT
+- Build from root (frontend is in `web/`)
+- Assume dist/ is at root (it's `web/dist/`)
 
-Don't use any MCPs, skills, or other features in your harness. Show me your organic built-in capabilities for tasteful design.
+## Git Rules
+- Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
+- Never add Co-Authored-By lines or mention AI in commits
+- No em dashes in commit messages
 
-**Use your frontend design skill to make these designs exceptional.**
+---
 
-### FIVE DESIGN VARIANTS REQUIRED
+## OpenClaw Sync Protocol
 
-**For every project with a frontend UI, create FIVE different designs.**
+An AI assistant (clawdbot) runs in OpenClaw and manages this workspace. It reads memory files on every session start. Follow this protocol so it stays in the loop about your changes.
 
-Each design should be creative and unique from all the others. Host them on /1, /2, /3, /4 and /5 respectively. This lets the user pick from distinct aesthetic directions.
+### After completing a task, append to:
+`~/.openclaw/workspace/memory/YYYY-MM-DD.md`
 
-Each variant should feel like it was created by a different designer with a different aesthetic philosophy. NEVER converge on common "safe" choices.
+Use today's date. Create the file if it doesn't exist.
 
-### Design Requirements
-- Commit to a BOLD aesthetic direction for each variant
-- No generic Inter/Roboto/Arial fonts
-- No cliched purple gradients on white backgrounds
-- No cookie-cutter layouts
-- Each component should feel intentional, not template-generated
-- Make it feel like a human designer crafted it
+### Format:
+```markdown
+## Claude Code Session - [HH:MM AM/PM EST]
+**Project:** Playbook Forge
+**Branch:** [branch name]
 
-See FRONTEND_DESIGN.md for full design guidelines.
+### What changed
+- [Bullet list of features/fixes/refactors]
+- [Files added/modified/deleted]
+
+### Decisions made
+- [Any architectural choices, tradeoffs, library picks]
+
+### Issues / TODO
+- [Anything incomplete, broken, or needing follow-up]
+
+### Git
+- [Commit hashes or "pushed to main" / "on branch X"]
+```
+
+### Rules:
+1. Always write the summary. Even for small changes.
+2. Be specific about files.
+3. Note decisions and why.
+4. Don't edit MEMORY.md (clawdbot's long-term memory).
+5. Don't edit other memory/ files. Only append to today's date file.
+6. Commit and push your work.
