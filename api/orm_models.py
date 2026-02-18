@@ -39,6 +39,7 @@ class Playbook(Base):
     category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     content_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     graph_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    share_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False

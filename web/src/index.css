@@ -15,3 +15,55 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+
+  nav,
+  aside,
+  .no-print,
+  .toolbar-controls,
+  button,
+  input,
+  textarea,
+  select,
+  .react-flow__controls,
+  .react-flow__minimap,
+  .react-flow__attribution {
+    display: none !important;
+  }
+
+  .print-header {
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+  }
+
+  .print-meta {
+    display: block !important;
+    color: #555 !important;
+  }
+
+  .print-content-grid,
+  .print-flow-section,
+  .print-steps-section {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: transparent !important;
+    border-color: #ddd !important;
+    color: #111 !important;
+    page-break-inside: avoid;
+  }
+
+  .phase-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border-color: #ddd !important;
+    margin-bottom: 8px;
+  }
+}

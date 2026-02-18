@@ -192,3 +192,100 @@ export function getVersions(id: string): Promise<ApiPlaybookVersion[]> {
 export function getVersion(id: string, versionNumber: number): Promise<ApiPlaybookVersion> {
   return request<ApiPlaybookVersion>(`/api/playbooks/${encodeURIComponent(id)}/versions/${versionNumber}`);
 }
+
+export type ExportFormat = 'markdown' | 'mermaid' | 'json';
+
+async function requestText(path: string, options: RequestInit = {}): Promise<string> {
+  const url = `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const data = await parseJsonSafe(response);
+    const message =
+      data?.detail ||
+      data?.error ||
+      data?.message ||
+      response.statusText ||
+      'Request failed';
+    throw new ApiClientError(message, response.status, data);
+  }
+
+  return response.text();
+}
+
+export async function exportPlaybook(id: string, format: ExportFormat): Promise<string | Record<string, any>> {
+  const path = `/api/playbooks/${encodeURIComponent(id)}/export?format=${format}`;
+  if (format === 'json') {
+    return request<Record<string, any>>(path);
+  }
+  return requestText(path);
+}
+
+export function importPlaybook(data: Record<string, any>): Promise<ApiPlaybook> {
+  return request<ApiPlaybook>('/api/playbooks/import', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface BulkImportResultItem {
+  filename?: string;
+  success?: boolean;
+  id?: string;
+  title?: string;
+  error?: string;
+  [key: string]: any;
+}
+
+export async function bulkImportPlaybooks(files: File[]): Promise<BulkImportResultItem[]> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+
+  const url = `${API_BASE_URL}/api/playbooks/import/bulk`;
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const data = await parseJsonSafe(response);
+    const message =
+      data?.detail ||
+      data?.error ||
+      data?.message ||
+      response.statusText ||
+      'Request failed';
+    throw new ApiClientError(message, response.status, data);
+  }
+
+  const data = await parseJsonSafe(response);
+  if (Array.isArray(data)) return data as BulkImportResultItem[];
+  if (Array.isArray(data?.results)) return data.results as BulkImportResultItem[];
+  return [];
+}
+
+export interface ShareResponse {
+  share_url: string;
+  token: string;
+}
+
+export function createShareLink(id: string): Promise<ShareResponse> {
+  return request<ShareResponse>(`/api/playbooks/${encodeURIComponent(id)}/share`, {
+    method: 'POST',
+  });
+}
+
+export function revokeShareLink(id: string): Promise<{ success?: boolean } | null> {
+  return request<{ success?: boolean } | null>(`/api/playbooks/${encodeURIComponent(id)}/share`, {
+    method: 'DELETE',
+  });
+}
+
+export function getSharedPlaybook(token: string): Promise<ApiPlaybook> {
+  return request<ApiPlaybook>(`/api/shared/${encodeURIComponent(token)}`);
+}

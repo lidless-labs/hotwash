@@ -65,6 +65,8 @@ interface FlowCanvasProps {
   customNodeTypes?: NodeTypes;
   onNodesChange?: (nodes: FlowNode[]) => void;
   onEdgesChange?: (edges: FlowEdge[]) => void;
+  /** Disable editing interactions (drag/connect) */
+  readOnly?: boolean;
 }
 
 /**
@@ -189,7 +191,7 @@ const convertToFlowFormat = (graph: PlaybookGraph, theme: PlaybookTheme = DEFAUL
   return { nodes: flowNodes, edges: flowEdges };
 };
 
-const FlowCanvas: React.FC<FlowCanvasProps> = ({ graph, theme, customNodeTypes }) => {
+const FlowCanvas: React.FC<FlowCanvasProps> = ({ graph, theme, customNodeTypes, readOnly = false }) => {
   const activeTheme = theme ?? DEFAULT_THEME;
 
   // Convert graph to flow format
@@ -258,6 +260,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({ graph, theme, customNodeTypes }
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        elementsSelectable={!readOnly}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         attributionPosition="bottom-right"

@@ -2,11 +2,18 @@
  * EditorPage — Split-pane playbook editor with live FlowCanvas preview.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import FlowCanvas from '../components/FlowCanvas';
 import { PlaybookGraph } from '../types';
 import { parseMarkdownToGraph } from '../parsers/markdownParser';
-import { createPlaybook, getPlaybook, updatePlaybook } from '../api/client';
+import {
+  createPlaybook,
+  createShareLink,
+  exportPlaybook,
+  getPlaybook,
+  revokeShareLink,
+  updatePlaybook,
+} from '../api/client';
 import { allPlaybooks } from '../data';
 import { useHashRouter } from '../router';
 
@@ -35,6 +42,14 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const shareRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setCurrentId(playbookId);
@@ -106,6 +121,25 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
     return () => clearTimeout(handle);
   }, [markdown]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 1500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    const onClickOutside = (event: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(event.target as Node)) {
+        setExportOpen(false);
+      }
+      if (shareRef.current && !shareRef.current.contains(event.target as Node)) {
+        setShareOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
   const tagList = useMemo(
     () => tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean),
     [tagsInput]
@@ -139,11 +173,88 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
     }
   };
 
+  const triggerDownload = (fileName: string, content: string, type: string) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExport = async (format: 'markdown' | 'mermaid' | 'json') => {
+    if (!currentId) {
+      setToast('Save first to export');
+      return;
+    }
+
+    try {
+      const data = await exportPlaybook(currentId, format);
+      const safeTitle = (title || 'playbook').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      if (format === 'mermaid') {
+        await navigator.clipboard.writeText(String(data));
+        setToast('Copied!');
+      } else if (format === 'markdown') {
+        triggerDownload(`${safeTitle}.md`, String(data), 'text/markdown;charset=utf-8');
+      } else {
+        triggerDownload(`${safeTitle}.json`, JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
+      }
+      setExportOpen(false);
+    } catch {
+      setToast('Export failed');
+    }
+  };
+
+  const handleCreateShare = async () => {
+    if (!currentId) {
+      setToast('Save first to share');
+      return;
+    }
+    setSharing(true);
+    try {
+      const response = await createShareLink(currentId);
+      setShareUrl(response.share_url);
+    } catch {
+      setToast('Failed to create share link');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleRevokeShare = async () => {
+    if (!currentId) return;
+    if (!window.confirm('Revoke this share link?')) return;
+    setSharing(true);
+    try {
+      await revokeShareLink(currentId);
+      setShareUrl(null);
+    } catch {
+      setToast('Failed to revoke share link');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setToast('Link copied!');
+  };
+
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-100">
+      {toast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 rounded-md bg-cyan-600 px-4 py-2 text-sm font-semibold text-white z-[60]">
+          {toast}
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between no-print toolbar-controls">
             <div>
               <h1 className="text-2xl font-semibold">Playbook Editor</h1>
               <p className="text-sm text-slate-400 mt-1">Draft, preview, and persist playbooks.</p>
@@ -155,6 +266,73 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
               >
                 Back to Library
               </button>
+              <button
+                className="px-4 py-2 rounded-md border border-slate-700 bg-slate-800 text-sm text-slate-200"
+                onClick={() => navigate('#/import')}
+              >
+                Import
+              </button>
+
+              <div className="relative" ref={exportRef}>
+                <button
+                  className="px-4 py-2 rounded-md border border-slate-700 bg-slate-800 text-sm text-slate-200 hover:bg-slate-700"
+                  onClick={() => setExportOpen((v) => !v)}
+                >
+                  Export ▾
+                </button>
+                {exportOpen && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-md border border-slate-700 bg-slate-900 shadow-xl z-50">
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-slate-800" onClick={() => handleExport('markdown')}>
+                      Markdown
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-slate-800" onClick={() => handleExport('mermaid')}>
+                      Mermaid (Copy)
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-slate-800" onClick={() => handleExport('json')}>
+                      JSON
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-slate-500 cursor-not-allowed" disabled title="Coming Soon">
+                      PDF (Coming Soon)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="relative" ref={shareRef}>
+                <button
+                  className="px-4 py-2 rounded-md border border-slate-700 bg-slate-800 text-sm text-slate-200 hover:bg-slate-700"
+                  onClick={() => {
+                    setShareOpen((v) => !v);
+                    if (!shareUrl && currentId) void handleCreateShare();
+                  }}
+                >
+                  Share
+                </button>
+                {shareOpen && (
+                  <div className="absolute right-0 mt-2 w-80 rounded-md border border-slate-700 bg-slate-900 p-4 shadow-xl z-50">
+                    {sharing ? (
+                      <p className="text-sm text-slate-400">Working...</p>
+                    ) : shareUrl ? (
+                      <div className="space-y-3">
+                        <p className="text-xs text-slate-400">Share URL</p>
+                        <div className="rounded border border-slate-700 bg-slate-950 px-2 py-2 text-xs break-all text-blue-300">{shareUrl}</div>
+                        <div className="flex gap-2 justify-end">
+                          <button className="px-3 py-1 rounded bg-blue-600 text-xs text-white" onClick={copyShareLink}>Copy Link</button>
+                          <button className="px-3 py-1 rounded bg-red-600 text-xs text-white" onClick={handleRevokeShare}>Revoke</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-sm text-slate-300">Create a shareable read-only link for this playbook.</p>
+                        <div className="flex justify-end">
+                          <button className="px-3 py-1 rounded bg-blue-600 text-xs text-white" onClick={handleCreateShare}>Create Link</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <button
                 className="px-4 py-2 rounded-md bg-blue-600 text-sm text-white hover:bg-blue-500 disabled:opacity-60"
                 onClick={handleSave}
@@ -217,8 +395,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="flex flex-col gap-3">
+          <div className="grid gap-6 lg:grid-cols-2 print-content-grid">
+            <div className="flex flex-col gap-3 no-print">
               <div className="flex items-center justify-between text-sm text-slate-300">
                 <span>Markdown</span>
                 <span className="text-xs text-slate-500">Live preview (300ms debounce)</span>
@@ -230,7 +408,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
                 placeholder="# Incident Response Playbook\n\n1. Detect alert..."
               />
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 print-flow-section">
               <div className="text-sm text-slate-300">Flow Preview</div>
               <div className="rounded-md border border-slate-800 bg-slate-900/60 min-h-[520px]">
                 <FlowCanvas graph={graph} />
@@ -239,7 +417,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ playbookId }) => {
           </div>
 
           {tagList.length > 0 && (
-            <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+            <div className="flex flex-wrap gap-2 text-xs text-slate-400 no-print">
               {tagList.map((tag) => (
                 <span key={tag} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1">
                   {tag}

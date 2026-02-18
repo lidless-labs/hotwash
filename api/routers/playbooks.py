@@ -5,6 +5,7 @@ CRUD endpoints for playbook persistence and versioning.
 """
 
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +21,8 @@ from api.schemas import (
     PlaybookSummary,
     PlaybookUpdate,
     PlaybookVersionOut,
+    ShareResponse,
+    SharedPlaybookResponse,
     TagOut,
 )
 
@@ -103,6 +106,7 @@ def _build_detail(playbook: Playbook) -> PlaybookDetail:
         created_at=playbook.created_at,
         updated_at=playbook.updated_at,
         versions_count=len(playbook.versions),
+        share_token=playbook.share_token,
     )
 
 
@@ -295,3 +299,36 @@ def get_version(playbook_id: int, version_number: int, db: Session = Depends(get
         change_summary=version.change_summary,
         created_at=version.created_at,
     )
+
+
+@router.post("/playbooks/{playbook_id}/share", response_model=ShareResponse)
+def create_share_link(playbook_id: int, db: Session = Depends(get_db)):
+    playbook = _ensure_playbook(db, playbook_id)
+    token = str(uuid.uuid4())
+    playbook.share_token = token
+    db.commit()
+    return ShareResponse(share_url=f"/shared/{token}", token=token)
+
+
+@router.delete("/playbooks/{playbook_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_share_link(playbook_id: int, db: Session = Depends(get_db)):
+    playbook = _ensure_playbook(db, playbook_id)
+    playbook.share_token = None
+    db.commit()
+    return None
+
+
+@router.get("/shared/{token}", response_model=SharedPlaybookResponse)
+def get_shared_playbook(token: str, db: Session = Depends(get_db)):
+    playbook = (
+        db.query(Playbook)
+        .filter(
+            Playbook.share_token == token,
+            Playbook.is_deleted.is_(False),
+        )
+        .first()
+    )
+    if not playbook:
+        raise HTTPException(status_code=404, detail="Shared playbook not found")
+
+    return SharedPlaybookResponse(**_build_detail(playbook).model_dump(), shared=True)

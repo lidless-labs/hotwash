@@ -17,6 +17,8 @@ import { useDefaultVariant } from './hooks/useDefaultVariant';
 import VariantPicker from './pages/VariantPicker';
 import LibraryPage from './pages/LibraryPage';
 import EditorPage from './pages/EditorPage';
+import ImportPage from './pages/ImportPage';
+import SharedPage from './pages/SharedPage';
 import V1App from './variants/v1';
 import V2App from './variants/v2';
 import V3App from './variants/v3';
@@ -113,6 +115,25 @@ function App() {
         <div className="App">
           {sharedUI}
           <EditorPage playbookId={route.params.id} />
+          <GitHubFooter />
+        </div>
+      );
+    }
+
+    if (route.page === 'import') {
+      return (
+        <div className="App">
+          {sharedUI}
+          <ImportPage />
+          <GitHubFooter />
+        </div>
+      );
+    }
+
+    if (route.page === 'shared') {
+      return (
+        <div className="App">
+          <SharedPage token={route.params.token} />
           <GitHubFooter />
         </div>
       );

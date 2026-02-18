@@ -7,6 +7,8 @@
  *   /library       → Global playbook library
  *   /editor        → Create new playbook
  *   /editor/:id    → Edit existing playbook
+ *   /import        → Import playbooks (JSON/Markdown)
+ *   /shared/:token → Read-only shared playbook view
  *   /1 .. /5       → Variant app root
  *   /N/library     → Playbook library for variant N
  *   /N/playbook/:slug → View specific playbook
@@ -20,7 +22,7 @@ export interface RouteMatch {
   path: string;
   /** Variant number 1-5 or null for root */
   variant: number | null;
-  /** Page identifier: 'picker' | 'home' | 'library' | 'playbook' | 'import' | 'dashboard' | 'docs' */
+  /** Page identifier: 'picker' | 'home' | 'library' | 'playbook' | 'import' | 'editor' | 'shared' | 'dashboard' | 'docs' */
   page: string;
   /** Dynamic parameters (e.g., { slug: 'vulnerability-remediation-python' }) */
   params: Record<string, string>;
@@ -51,6 +53,22 @@ export function matchRoute(hash: string): RouteMatch {
       variant: null,
       page: 'editor',
       params: editorMatch[1] ? { id: editorMatch[1] } : {},
+    };
+  }
+
+  // Global import
+  if (path === '/import') {
+    return { path, variant: null, page: 'import', params: {} };
+  }
+
+  // Shared playbook view
+  const sharedMatch = path.match(/^\/shared\/(.+)$/);
+  if (sharedMatch) {
+    return {
+      path,
+      variant: null,
+      page: 'shared',
+      params: { token: sharedMatch[1] },
     };
   }
 
