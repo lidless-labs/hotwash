@@ -6,15 +6,21 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
+from api.auth import get_api_key
 from api.database import get_db
 from api.orm_models import Playbook
-from api.routers.playbooks import _build_detail, _deserialize_graph, _get_or_create_tag, _serialize_graph
-from api.schemas import BulkImportResult, PlaybookDetail, PlaybookExport
+from api.routers.playbooks import _build_detail, _deserialize_graph, _serialize_graph
+from api.schemas import BulkImportResult, PlaybookDetail, PlaybookExport, PlaybookImport
+from api.services.tags import get_or_create_tag
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_api_key)])
+
+MAX_BULK_IMPORT_FILES = 50
+MAX_BULK_IMPORT_FILE_SIZE = 10 * 1024 * 1024
+ALLOWED_BULK_CONTENT_TYPES = {"text/markdown", "text/plain", "application/octet-stream", ""}
 
 
 def _get_playbook_or_404(db: Session, playbook_id: int) -> Playbook:
@@ -157,6 +163,32 @@ def _to_mermaid(graph: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _create_imported_playbook(db: Session, payload: PlaybookImport) -> Playbook:
+    playbook = Playbook(
+        title=payload.title.strip(),
+        description=payload.description,
+        category=payload.category.strip(),
+        content_markdown=payload.content_markdown,
+        graph_json=_serialize_graph(payload.graph_json),
+    )
+
+    if payload.tags:
+        playbook.tags = [get_or_create_tag(db, tag) for tag in payload.tags if tag.strip()]
+
+    db.add(playbook)
+    db.flush()
+    return playbook
+
+
+def _validate_bulk_import_file(file: UploadFile, raw: bytes) -> None:
+    if not file.filename or not file.filename.lower().endswith(".md"):
+        raise HTTPException(status_code=400, detail=f"{file.filename or 'unnamed file'} must be a .md file")
+    if file.content_type not in ALLOWED_BULK_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"{file.filename} has unsupported content type {file.content_type}")
+    if len(raw) > MAX_BULK_IMPORT_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"{file.filename} exceeds the 10MB file size limit")
+
+
 @router.get("/playbooks/{playbook_id}/export")
 def export_playbook(
     playbook_id: int,
@@ -213,24 +245,8 @@ def export_playbook(
 
 
 @router.post("/playbooks/import", response_model=PlaybookDetail, status_code=status.HTTP_201_CREATED)
-def import_playbook(payload: PlaybookExport, db: Session = Depends(get_db)):
-    if not payload.title or not payload.title.strip():
-        raise HTTPException(status_code=400, detail="title is required")
-    if not payload.category or not str(payload.category).strip():
-        raise HTTPException(status_code=400, detail="category is required")
-
-    playbook = Playbook(
-        title=payload.title.strip(),
-        description=payload.description,
-        category=payload.category,
-        content_markdown=payload.content_markdown,
-        graph_json=_serialize_graph(payload.graph_json),
-    )
-
-    if payload.tags:
-        playbook.tags = [_get_or_create_tag(db, tag.name if hasattr(tag, "name") else str(tag)) for tag in payload.tags]
-
-    db.add(playbook)
+def import_playbook(payload: PlaybookImport, db: Session = Depends(get_db)):
+    playbook = _create_imported_playbook(db, payload)
     db.commit()
     db.refresh(playbook)
     return _build_detail(playbook)
@@ -238,14 +254,14 @@ def import_playbook(payload: PlaybookExport, db: Session = Depends(get_db)):
 
 @router.post("/playbooks/import/bulk", response_model=List[BulkImportResult])
 async def bulk_import_markdown(files: List[UploadFile] = File(...), db: Session = Depends(get_db)):
-    results: List[BulkImportResult] = []
+    if len(files) > MAX_BULK_IMPORT_FILES:
+        raise HTTPException(status_code=400, detail="Bulk import supports a maximum of 50 files per request")
 
-    for file in files:
-        try:
-            if not file.filename.lower().endswith(".md"):
-                raise ValueError("Only .md files are supported")
-
+    payloads: List[tuple[str, PlaybookImport]] = []
+    try:
+        for file in files:
             raw = await file.read()
+            _validate_bulk_import_file(file, raw)
             text = raw.decode("utf-8")
 
             title = "Imported Playbook"
@@ -254,32 +270,31 @@ async def bulk_import_markdown(files: List[UploadFile] = File(...), db: Session 
                     title = line.strip()[2:].strip() or title
                     break
 
-            playbook = Playbook(
-                title=title,
-                description=None,
-                category="Imported",
-                content_markdown=text,
-                graph_json=json.dumps({"nodes": [], "edges": []}),
-            )
-            db.add(playbook)
-            db.commit()
-            db.refresh(playbook)
+            payloads.append((
+                file.filename,
+                PlaybookImport(
+                    title=title,
+                    description=None,
+                    category="Imported",
+                    content_markdown=text,
+                    graph_json={"nodes": [], "edges": []},
+                    tags=[],
+                ),
+            ))
 
-            results.append(
-                BulkImportResult(
-                    filename=file.filename,
-                    status="success",
-                    playbook_id=playbook.id,
-                )
-            )
-        except Exception as exc:
-            db.rollback()
-            results.append(
-                BulkImportResult(
-                    filename=file.filename,
-                    status="error",
-                    error=str(exc),
-                )
-            )
+        created: List[BulkImportResult] = []
+        for filename, payload in payloads:
+            playbook = _create_imported_playbook(db, payload)
+            created.append(BulkImportResult(filename=filename, status="success", playbook_id=playbook.id))
 
-    return results
+        db.commit()
+        return created
+    except UnicodeDecodeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="All bulk import files must be valid UTF-8 markdown") from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Bulk import failed: {exc}") from exc

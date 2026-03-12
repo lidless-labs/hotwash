@@ -26,12 +26,17 @@ export class ApiClientError extends Error {
   }
 }
 
+export interface ApiTag {
+  id: number;
+  name: string;
+}
+
 export interface ApiPlaybookSummary {
-  id: string;
+  id: number;
   title: string;
   description?: string;
   category?: string;
-  tags?: string[];
+  tags?: ApiTag[];
   created_at?: string;
   updated_at?: string;
   node_count?: number;
@@ -46,8 +51,6 @@ export interface ApiPlaybook extends ApiPlaybookSummary {
 }
 
 export interface ApiPlaybookVersion {
-  id: string;
-  playbook_id: string;
   version_number: number;
   content_markdown: string;
   graph_json?: PlaybookGraph;
@@ -137,8 +140,8 @@ export function listPlaybooks(filters: ListPlaybooksFilters = {}): Promise<ApiPl
   return request<ApiPlaybookSummary[]>(`/api/playbooks${qs ? `?${qs}` : ''}`);
 }
 
-export function getPlaybook(id: string): Promise<ApiPlaybook> {
-  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(id)}`);
+export function getPlaybook(id: string | number): Promise<ApiPlaybook> {
+  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(String(id))}`);
 }
 
 export interface CreatePlaybookPayload {
@@ -164,8 +167,8 @@ export interface UpdatePlaybookPayload {
   tags?: string[];
 }
 
-export function updatePlaybook(id: string, data: UpdatePlaybookPayload): Promise<ApiPlaybook> {
-  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(id)}`,
+export function updatePlaybook(id: string | number, data: UpdatePlaybookPayload): Promise<ApiPlaybook> {
+  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(String(id))}`,
     {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -173,24 +176,24 @@ export function updatePlaybook(id: string, data: UpdatePlaybookPayload): Promise
   );
 }
 
-export async function deletePlaybook(id: string): Promise<{ success: boolean } | null> {
-  return request<{ success: boolean } | null>(`/api/playbooks/${encodeURIComponent(id)}`,
+export async function deletePlaybook(id: string | number): Promise<{ success: boolean } | null> {
+  return request<{ success: boolean } | null>(`/api/playbooks/${encodeURIComponent(String(id))}`,
     { method: 'DELETE' }
   );
 }
 
-export function duplicatePlaybook(id: string): Promise<ApiPlaybook> {
-  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(id)}/duplicate`, {
+export function duplicatePlaybook(id: string | number): Promise<ApiPlaybook> {
+  return request<ApiPlaybook>(`/api/playbooks/${encodeURIComponent(String(id))}/duplicate`, {
     method: 'POST',
   });
 }
 
-export function getVersions(id: string): Promise<ApiPlaybookVersion[]> {
-  return request<ApiPlaybookVersion[]>(`/api/playbooks/${encodeURIComponent(id)}/versions`);
+export function getVersions(id: string | number): Promise<ApiPlaybookVersion[]> {
+  return request<ApiPlaybookVersion[]>(`/api/playbooks/${encodeURIComponent(String(id))}/versions`);
 }
 
-export function getVersion(id: string, versionNumber: number): Promise<ApiPlaybookVersion> {
-  return request<ApiPlaybookVersion>(`/api/playbooks/${encodeURIComponent(id)}/versions/${versionNumber}`);
+export function getVersion(id: string | number, versionNumber: number): Promise<ApiPlaybookVersion> {
+  return request<ApiPlaybookVersion>(`/api/playbooks/${encodeURIComponent(String(id))}/versions/${versionNumber}`);
 }
 
 export type ExportFormat = 'markdown' | 'mermaid' | 'json';
@@ -218,8 +221,8 @@ async function requestText(path: string, options: RequestInit = {}): Promise<str
   return response.text();
 }
 
-export async function exportPlaybook(id: string, format: ExportFormat): Promise<string | Record<string, any>> {
-  const path = `/api/playbooks/${encodeURIComponent(id)}/export?format=${format}`;
+export async function exportPlaybook(id: string | number, format: ExportFormat): Promise<string | Record<string, any>> {
+  const path = `/api/playbooks/${encodeURIComponent(String(id))}/export?format=${format}`;
   if (format === 'json') {
     return request<Record<string, any>>(path);
   }
@@ -235,9 +238,8 @@ export function importPlaybook(data: Record<string, any>): Promise<ApiPlaybook> 
 
 export interface BulkImportResultItem {
   filename?: string;
-  success?: boolean;
-  id?: string;
-  title?: string;
+  status?: string;
+  playbook_id?: number;
   error?: string;
   [key: string]: any;
 }
@@ -274,14 +276,14 @@ export interface ShareResponse {
   token: string;
 }
 
-export function createShareLink(id: string): Promise<ShareResponse> {
-  return request<ShareResponse>(`/api/playbooks/${encodeURIComponent(id)}/share`, {
+export function createShareLink(id: string | number): Promise<ShareResponse> {
+  return request<ShareResponse>(`/api/playbooks/${encodeURIComponent(String(id))}/share`, {
     method: 'POST',
   });
 }
 
-export function revokeShareLink(id: string): Promise<{ success?: boolean } | null> {
-  return request<{ success?: boolean } | null>(`/api/playbooks/${encodeURIComponent(id)}/share`, {
+export function revokeShareLink(id: string | number): Promise<{ success?: boolean } | null> {
+  return request<{ success?: boolean } | null>(`/api/playbooks/${encodeURIComponent(String(id))}/share`, {
     method: 'DELETE',
   });
 }

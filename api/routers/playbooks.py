@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from api.auth import get_api_key
 from api.database import get_db
 from api.orm_models import Playbook, PlaybookVersion, Tag
 from api.parsers.markdown_parser import MarkdownParser
@@ -25,23 +26,9 @@ from api.schemas import (
     SharedPlaybookResponse,
     TagOut,
 )
+from api.services.tags import get_or_create_tag, normalize_tag
 
-router = APIRouter()
-
-
-def _normalize_tag(name: str) -> str:
-    return "-".join(name.strip().lower().split())
-
-
-def _get_or_create_tag(db: Session, name: str) -> Tag:
-    normalized = _normalize_tag(name)
-    existing = db.query(Tag).filter(Tag.name == normalized).first()
-    if existing:
-        return existing
-    tag = Tag(name=normalized)
-    db.add(tag)
-    db.flush()
-    return tag
+router = APIRouter(dependencies=[Depends(get_api_key)])
 
 
 def _parse_graph_json(content_markdown: str) -> Dict[str, Any]:
@@ -93,7 +80,7 @@ def _build_summary(playbook: Playbook) -> PlaybookSummary:
     )
 
 
-def _build_detail(playbook: Playbook) -> PlaybookDetail:
+def _build_detail(playbook: Playbook, versions_count: int = 0) -> PlaybookDetail:
     return PlaybookDetail(
         id=playbook.id,
         title=playbook.title,
@@ -105,14 +92,20 @@ def _build_detail(playbook: Playbook) -> PlaybookDetail:
         node_count=_node_count_from_graph(playbook.graph_json),
         created_at=playbook.created_at,
         updated_at=playbook.updated_at,
-        versions_count=len(playbook.versions),
+        versions_count=versions_count,
         share_token=playbook.share_token,
     )
+
+
+def _get_versions_count(db: Session, playbook_id: int) -> int:
+    count = db.query(func.count(PlaybookVersion.id)).filter(PlaybookVersion.playbook_id == playbook_id).scalar()
+    return int(count or 0)
 
 
 def _ensure_playbook(db: Session, playbook_id: int) -> Playbook:
     playbook = (
         db.query(Playbook)
+        .options(selectinload(Playbook.tags))
         .filter(Playbook.id == playbook_id, Playbook.is_deleted.is_(False))
         .first()
     )
@@ -133,12 +126,12 @@ def create_playbook(payload: PlaybookCreate, db: Session = Depends(get_db)):
     )
 
     if payload.tags:
-        playbook.tags = [_get_or_create_tag(db, name) for name in payload.tags if name.strip()]
+        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags if name.strip()]
 
     db.add(playbook)
     db.commit()
     db.refresh(playbook)
-    return _build_detail(playbook)
+    return _build_detail(playbook, versions_count=0)
 
 
 @router.get("/playbooks", response_model=List[PlaybookSummary])
@@ -150,7 +143,21 @@ def list_playbooks(
     sort: str = Query(default="updated", pattern="^(created|updated|title)$"),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ):
-    query = db.query(Playbook).filter(Playbook.is_deleted.is_(False))
+    version_counts = (
+        db.query(
+            PlaybookVersion.playbook_id.label("playbook_id"),
+            func.count(PlaybookVersion.id).label("versions_count"),
+        )
+        .group_by(PlaybookVersion.playbook_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(Playbook, func.coalesce(version_counts.c.versions_count, 0).label("versions_count"))
+        .options(selectinload(Playbook.tags))
+        .outerjoin(version_counts, version_counts.c.playbook_id == Playbook.id)
+        .filter(Playbook.is_deleted.is_(False))
+    )
 
     if category:
         query = query.filter(Playbook.category == category)
@@ -165,7 +172,7 @@ def list_playbooks(
         )
 
     if tag:
-        query = query.join(Playbook.tags).filter(Tag.name == _normalize_tag(tag))
+        query = query.join(Playbook.tags).filter(Tag.name == normalize_tag(tag))
 
     sort_column = {
         "created": Playbook.created_at,
@@ -173,19 +180,15 @@ def list_playbooks(
         "title": Playbook.title,
     }.get(sort, Playbook.updated_at)
 
-    if order == "asc":
-        query = query.order_by(sort_column.asc())
-    else:
-        query = query.order_by(sort_column.desc())
-
+    query = query.order_by(sort_column.asc() if order == "asc" else sort_column.desc())
     playbooks = query.all()
-    return [_build_summary(playbook) for playbook in playbooks]
+    return [_build_summary(playbook) for playbook, _ in playbooks]
 
 
 @router.get("/playbooks/{playbook_id}", response_model=PlaybookDetail)
 def get_playbook(playbook_id: int, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
-    return _build_detail(playbook)
+    return _build_detail(playbook, versions_count=_get_versions_count(db, playbook_id))
 
 
 @router.put("/playbooks/{playbook_id}", response_model=PlaybookDetail)
@@ -222,11 +225,11 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
         playbook.category = payload.category
 
     if payload.tags is not None:
-        playbook.tags = [_get_or_create_tag(db, name) for name in payload.tags if name.strip()]
+        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags if name.strip()]
 
     db.commit()
     db.refresh(playbook)
-    return _build_detail(playbook)
+    return _build_detail(playbook, versions_count=_get_versions_count(db, playbook_id))
 
 
 @router.delete("/playbooks/{playbook_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -253,7 +256,7 @@ def duplicate_playbook(playbook_id: int, db: Session = Depends(get_db)):
     db.add(duplicate)
     db.commit()
     db.refresh(duplicate)
-    return _build_detail(duplicate)
+    return _build_detail(duplicate, versions_count=0)
 
 
 @router.get("/playbooks/{playbook_id}/versions", response_model=List[PlaybookVersionOut])
@@ -322,6 +325,7 @@ def revoke_share_link(playbook_id: int, db: Session = Depends(get_db)):
 def get_shared_playbook(token: str, db: Session = Depends(get_db)):
     playbook = (
         db.query(Playbook)
+        .options(selectinload(Playbook.tags))
         .filter(
             Playbook.share_token == token,
             Playbook.is_deleted.is_(False),
@@ -331,4 +335,7 @@ def get_shared_playbook(token: str, db: Session = Depends(get_db)):
     if not playbook:
         raise HTTPException(status_code=404, detail="Shared playbook not found")
 
-    return SharedPlaybookResponse(**_build_detail(playbook).model_dump(), shared=True)
+    return SharedPlaybookResponse(
+        **_build_detail(playbook, versions_count=_get_versions_count(db, playbook.id)).model_dump(),
+        shared=True,
+    )

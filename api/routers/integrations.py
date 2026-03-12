@@ -9,12 +9,15 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from api.auth import get_api_key
+from api.crypto import decrypt_secret, encrypt_secret
 from api.database import get_db
 from api.integrations.config import Integration
 from api.integrations.mock_data import MOCK_HANDLERS
 from api.schemas import IntegrationOut, IntegrationUpdate
+from api.security import validate_integration_url
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_api_key)])
 
 VALID_TOOLS = {"thehive", "cortex", "wazuh", "misp"}
 URL_PATTERN = re.compile(r"^https?://\S+$")
@@ -30,7 +33,7 @@ def _to_out(i: Integration) -> IntegrationOut:
         mock_mode=i.mock_mode,
         last_checked=i.last_checked,
         last_status=i.last_status or "unchecked",
-        has_api_key=bool(i.api_key),
+        has_api_key=bool(decrypt_secret(i.api_key)),
         has_credentials=bool(i.username),
     )
 
@@ -65,11 +68,11 @@ def update_integration(tool: str, payload: IntegrationUpdate, db: Session = Depe
         integration.base_url = payload.base_url
 
     if payload.api_key is not None:
-        integration.api_key = payload.api_key
+        integration.api_key = encrypt_secret(payload.api_key)
     if payload.username is not None:
         integration.username = payload.username
     if payload.password is not None:
-        integration.password = payload.password
+        integration.password = encrypt_secret(payload.password)
     if payload.enabled is not None:
         integration.enabled = payload.enabled
     if payload.verify_ssl is not None:
@@ -102,13 +105,16 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=400, detail="No base_url configured")
 
+    validate_integration_url(integration.base_url)
+    api_key = decrypt_secret(integration.api_key)
+
     try:
         import requests
         resp = requests.get(
             integration.base_url,
             timeout=5,
             verify=integration.verify_ssl,
-            headers={"Authorization": f"Bearer {integration.api_key}"} if integration.api_key else {},
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
         )
         if resp.status_code in (200, 401, 403):
             integration.last_status = "connected"

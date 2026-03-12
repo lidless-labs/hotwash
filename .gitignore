@@ -46,6 +46,7 @@ credentials.json
 *-credentials.json
 *.pem
 *.key
+.encryption_key
 id_rsa*
 id_ed25519*
 

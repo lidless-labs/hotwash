@@ -15,25 +15,11 @@ from typing import List, Optional, Set
 from sqlalchemy.orm import Session
 
 from api.database import SessionLocal, init_db
-from api.orm_models import Playbook, Tag
+from api.orm_models import Playbook
 from api.parsers.markdown_parser import MarkdownParser
+from api.services.tags import get_or_create_tag, normalize_tag
 
 PLAYBOOKS_DIR = Path("/home/user/.openclaw/workspace/playbooks")
-
-
-def _normalize_tag(name: str) -> str:
-    return "-".join(name.strip().lower().split())
-
-
-def _get_or_create_tag(db: Session, name: str) -> Tag:
-    normalized = _normalize_tag(name)
-    existing = db.query(Tag).filter(Tag.name == normalized).first()
-    if existing:
-        return existing
-    tag = Tag(name=normalized)
-    db.add(tag)
-    db.flush()
-    return tag
 
 
 def _parse_front_matter_tags(content: str) -> List[str]:
@@ -125,12 +111,12 @@ def _parse_graph_json(content_markdown: str) -> str:
 def _collect_tags(content: str) -> Set[str]:
     tags: Set[str] = set()
     for tag in _parse_front_matter_tags(content):
-        normalized = _normalize_tag(tag)
+        normalized = normalize_tag(tag)
         if normalized:
             tags.add(normalized)
 
     for tag in _extract_metadata_tags(content):
-        normalized = _normalize_tag(tag)
+        normalized = normalize_tag(tag)
         if normalized:
             tags.add(normalized)
 
@@ -188,7 +174,7 @@ def seed(db: Session) -> int:
 
         tags = _collect_tags(content)
         if tags:
-            playbook.tags = [_get_or_create_tag(db, tag) for tag in sorted(tags)]
+            playbook.tags = [get_or_create_tag(db, tag) for tag in sorted(tags)]
 
         db.add(playbook)
         inserted += 1

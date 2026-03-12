@@ -10,7 +10,15 @@ uvicorn[standard]==0.27.0
 pydantic==2.5.3
 
 # Markdown processing
-python-markdown==3.5.2
+Markdown==3.5.2
+
+# Database and HTTP integrations
+SQLAlchemy==2.0.27
+requests==2.32.3
+python-multipart==0.0.9
 
 # Testing
 pytest==7.4.3
+
+# Encryption for integration secrets
+cryptography==44.0.1

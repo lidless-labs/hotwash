@@ -109,7 +109,7 @@ class PlaybookImport(BaseModel):
     category: str = Field(..., min_length=1)
     content_markdown: Optional[str] = None
     graph_json: Optional[Dict[str, Any]] = None
-    tags: Optional[List[str]] = None
+    tags: List[str] = Field(default_factory=list)
 
 
 class BulkImportResult(BaseModel):
