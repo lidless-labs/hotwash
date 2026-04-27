@@ -30,7 +30,7 @@ import V3App from './variants/v3';
 import V4App from './variants/v4';
 import V5App from './variants/v5';
 
-const APP_ID = 'playbook-forge';
+const APP_ID = 'hotwash';
 const VARIANT_NAMES = [
   'Command Line',
   'Blueprint',

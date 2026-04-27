@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 import uuid
 from typing import Optional
 
 from fastapi import Header, HTTPException, status
+
+from api._compat import getenv_compat
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,12 @@ def initialize_api_key() -> str:
     if _API_KEY:
         return _API_KEY
 
-    configured = os.getenv("PLAYBOOK_FORGE_API_KEY")
+    configured = getenv_compat("HOTWASH_API_KEY", "PLAYBOOK_FORGE_API_KEY")
     if configured:
         _API_KEY = configured
     else:
         _API_KEY = str(uuid.uuid4())
-        logger.warning("No PLAYBOOK_FORGE_API_KEY configured, generated an ephemeral API key")
+        logger.warning("No HOTWASH_API_KEY configured, generated an ephemeral API key")
         logger.debug("Generated API key: %s", _API_KEY)
 
     return _API_KEY

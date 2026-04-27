@@ -9,14 +9,19 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from api._compat import getenv_compat
+
 logger = logging.getLogger(__name__)
 
-_KEY_FILE = Path(os.getenv("PLAYBOOK_FORGE_KEY_PATH", str(Path.home() / ".encryption_key")))
+_KEY_FILE = Path(
+    getenv_compat("HOTWASH_KEY_PATH", "PLAYBOOK_FORGE_KEY_PATH")
+    or str(Path.home() / ".encryption_key")
+)
 _CIPHER: Fernet | None = None
 
 
 def _load_encryption_key() -> bytes:
-    configured = os.getenv("PLAYBOOK_FORGE_ENCRYPTION_KEY")
+    configured = getenv_compat("HOTWASH_ENCRYPTION_KEY", "PLAYBOOK_FORGE_ENCRYPTION_KEY")
     if configured:
         return configured.encode("utf-8")
 

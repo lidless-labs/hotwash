@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 /** localStorage key to track tour completion */
-const TOUR_STORAGE_KEY = 'playbook-forge-tour-complete';
+const TOUR_STORAGE_KEY = 'hotwash-tour-complete';
 
 /** driver.js types (loaded via CDN) */
 interface DriverStep {
