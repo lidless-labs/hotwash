@@ -37,10 +37,10 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
 
   server.tool(
     "hotwash_query_run",
-    "Get current state of an execution: status, all steps with their statuses, evidence, notes, and timeline. Use this between actions to see what changed.",
+    "Get current state of an execution: status, the full step list with statuses/evidence/notes, and optionally the timeline. Note that the steps array includes phase-marker nodes (node_type='phase'), but execution.steps_total and steps_completed exclude them, so steps.length will usually be larger than steps_total. Iterate over steps where node_type !== 'phase' for actionable items.",
     {
       execution_id: z.number().int().positive(),
-      include_timeline: z.boolean().optional().describe("Also return the chronological event log."),
+      include_timeline: z.boolean().optional().describe("Also return the chronological event log (returned in reverse-chronological order, newest first)."),
     },
     async ({ execution_id, include_timeline }) => {
       try {

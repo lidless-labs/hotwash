@@ -157,6 +157,8 @@ class ExecutionStep(BaseModel):
 
 
 class ExecutionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     playbook_id: int
     incident_title: str = Field(..., min_length=1)
     incident_id: Optional[str] = None
@@ -165,11 +167,15 @@ class ExecutionCreate(BaseModel):
 
 
 class ExecutionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: Optional[str] = None
     notes: Optional[str] = None
 
 
 class ExecutionStepUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: Optional[str] = None
     assignee: Optional[str] = None
     notes: Optional[str] = None
