@@ -21,7 +21,7 @@ from api.auth import initialize_api_key
 from api.crypto import get_cipher
 from api.database import init_db
 from api.seed import seed_db
-from api.routers import executions, export, integrations, parse, playbooks
+from api.routers import executions, export, ingest, integrations, parse, playbooks
 from api.routers.executions import ws_router as executions_ws_router
 
 logging.basicConfig(level=logging.INFO)
@@ -63,6 +63,8 @@ app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(integrations.router, prefix="/api", tags=["integrations"])
 app.include_router(executions.router, prefix="/api", tags=["executions"])
 app.include_router(executions_ws_router, prefix="/api", tags=["executions"])
+app.include_router(ingest.webhook_router, prefix="/api", tags=["ingest"])
+app.include_router(ingest.mappings_router, prefix="/api", tags=["ingest"])
 
 
 @app.exception_handler(Exception)

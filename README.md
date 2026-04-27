@@ -204,6 +204,16 @@ All actions are templates that teams can customize.
 
 ---
 
+## Wazuh integration
+
+Hotwash accepts Wazuh alerts via `POST /api/ingest/wazuh` (HMAC-authenticated)
+and matches them against a mapping table that can `auto`-start a run, queue a
+human-review suggestion, or log only. Mappings are managed via
+`/api/ingest/mappings` CRUD. See [docs/WAZUH-INGEST.md](docs/WAZUH-INGEST.md)
+for the integration script template, HMAC scheme, and cooldown semantics.
+
+---
+
 ## Roadmap
 
 Where Hotwash is going next: a Model Context Protocol server (`hotwash-mcp`) that exposes the playbook engine to AI agents, and a Wazuh alert ingestion path that turns inbound alerts into runs.

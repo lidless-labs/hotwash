@@ -213,6 +213,101 @@ class TimelineEventOut(BaseModel):
     description: str
 
 
+# --- Wazuh ingest schemas ---
+
+
+class WazuhRuleIn(BaseModel):
+    """Subset of Wazuh rule fields we read; pass-through for the rest."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    level: Optional[int] = None
+    description: Optional[str] = None
+    groups: List[str] = Field(default_factory=list)
+
+
+class WazuhAgentIn(BaseModel):
+    """Subset of Wazuh agent fields we read; pass-through for the rest."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    name: Optional[str] = None
+    ip: Optional[str] = None
+
+
+class WazuhAlertIngest(BaseModel):
+    """Inbound Wazuh alert payload.
+
+    extra="allow" intentionally: Wazuh decoders vary widely and rejecting
+    unknown fields would drop legitimate alerts. The full body is preserved
+    into Execution.context_json regardless of which fields we model here.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    rule: Optional[WazuhRuleIn] = None
+    agent: Optional[WazuhAgentIn] = None
+    timestamp: Optional[str] = None
+    full_log: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+
+class MappingCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1)
+    playbook_id: int
+    mode: str = Field(default="suggest")
+    rule_id_pattern: Optional[str] = None
+    rule_groups_pattern: Optional[str] = None
+    agent_name_pattern: Optional[str] = None
+    cooldown_seconds: int = Field(default=300, ge=0)
+    hmac_secret: str = Field(..., min_length=8)
+    enabled: bool = True
+
+
+class MappingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = None
+    playbook_id: Optional[int] = None
+    mode: Optional[str] = None
+    rule_id_pattern: Optional[str] = None
+    rule_groups_pattern: Optional[str] = None
+    agent_name_pattern: Optional[str] = None
+    cooldown_seconds: Optional[int] = Field(default=None, ge=0)
+    hmac_secret: Optional[str] = Field(default=None, min_length=8)
+    enabled: Optional[bool] = None
+
+
+class MappingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    playbook_id: int
+    mode: str
+    rule_id_pattern: Optional[str] = None
+    rule_groups_pattern: Optional[str] = None
+    agent_name_pattern: Optional[str] = None
+    cooldown_seconds: int
+    has_hmac_secret: bool
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class IngestResponse(BaseModel):
+    status: str
+    reason: Optional[str] = None
+    mapping_id: Optional[int] = None
+    fingerprint: Optional[str] = None
+    execution_id: Optional[int] = None
+    suggestion_id: Optional[int] = None
+
+
 # --- Integration schemas ---
 
 class IntegrationOut(BaseModel):

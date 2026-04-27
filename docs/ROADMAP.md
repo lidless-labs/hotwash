@@ -42,30 +42,33 @@ Lives at `mcp/` in this repo and ships as `hotwash-mcp` on npm.
 - Claude Code config snippet and OpenClaw skill stub in the README
 - Round-trip integration test: list -> start -> advance -> query
 
-## Pillar 2: Wazuh alert ingestion
+## Pillar 2: Wazuh alert ingestion (SHIPPED)
 
-Turn an inbound Wazuh alert into a Hotwash run. Wazuh is already a configurable
-tool in the integrations panel (credentials only); this adds the ingestion path.
+Status: SHIPPED in PR [#9](https://github.com/solomonneas/hotwash/pull/9)
+(commits [`5d1dd32`](https://github.com/solomonneas/hotwash/commit/5d1dd32)
+initial implementation,
+[`9447cac`](https://github.com/solomonneas/hotwash/commit/9447cac) review fixes).
 
-### Components
+See [WAZUH-INGEST.md](./WAZUH-INGEST.md) for the full reference: integration
+script template, mapping CRUD examples, HMAC scheme, cooldown semantics.
 
-- `POST /api/ingest/wazuh` webhook endpoint accepting Wazuh's integration JSON
-- A mapping table: `(rule.id | rule.groups | agent.name pattern) -> playbook_id`
-- Three trigger modes per mapping: `auto` (start the run), `suggest` (queue a notification), `off`
-- Cooldown + fingerprint dedup so an alert storm cannot spawn duplicate runs
-- Alert payload becomes `start_run` context, available to step instructions and SOAR action templates
+### What landed
 
-### Open design questions
-
-- **Push vs. pull.** Webhook from a Wazuh integration script is simplest. Polling the Wazuh API is a fallback for environments where outbound webhooks are blocked.
-- **Mapping storage.** New table, or a `triggers` field on the playbook record?
-- **Auth on the webhook.** HMAC over a shared secret per-mapping? IP allowlist?
-
-### Done means
-
-- A demo where firing a synthetic Wazuh alert triggers a run visible in the executions UI within seconds
-- One real mapping shipped as a seed (the existing Python CVE playbook is a natural candidate)
-- Docs for wiring up Wazuh's integration block
+- `POST /api/ingest/wazuh` webhook with HMAC-SHA256 auth and a per-mapping
+  shared secret, plus a 256 KB body cap (413 over).
+- `WazuhMapping` table with three modes (`auto`, `suggest`, `off`),
+  CSV-of-exacts patterns on `rule.id` / `rule.groups` / `agent.name`, and a
+  per-mapping cooldown window.
+- CRUD endpoints under `/api/ingest/mappings` (X-API-Key gated): list, create,
+  get, patch, delete. PATCH covers cooldown and secret rotation.
+- Seed mapping for Wazuh rule 23505 (vulnerability-detector level 10) wired to
+  the seeded Wazuh CVE playbook in `suggest` mode.
+- Body size cap enforced before and after read so a misbehaving integration
+  cannot OOM the API or bloat the database.
+- `IngestSuppressionLog` doubles as the cooldown anchor: only
+  `dispatched_auto`, `dispatched_suggest`, and `cooldown` rows count toward
+  the next cooldown window. `no_match` and `mode_off` do not, so flipping a
+  mapping does not silently swallow the next legitimate alert.
 
 ## Supporting work (lands as the pillars need it)
 
