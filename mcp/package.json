@@ -1,0 +1,59 @@
+{
+  "name": "hotwash-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Hotwash - drive incident response playbooks (start runs, advance steps, attach evidence) from any MCP-capable LLM",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "hotwash-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "Solomon Neas <me@solomonneas.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solomonneas/hotwash.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://github.com/solomonneas/hotwash#readme",
+  "bugs": {
+    "url": "https://github.com/solomonneas/hotwash/issues"
+  },
+  "keywords": [
+    "mcp",
+    "hotwash",
+    "incident-response",
+    "soc",
+    "playbook",
+    "soar",
+    "model-context-protocol",
+    "llm-tools",
+    "claude",
+    "security"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.6.0"
+  }
+}
