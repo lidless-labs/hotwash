@@ -12,7 +12,7 @@ async function main(): Promise<void> {
 
   const server = new McpServer({
     name: "hotwash-mcp",
-    version: "0.2.0",
+    version: "0.3.0",
     description:
       "Drive Hotwash incident response playbooks: list playbooks, start runs against incidents, advance steps, attach evidence, query timelines, and review the Wazuh ingest suggestion queue. Wraps the Hotwash REST API.",
   });

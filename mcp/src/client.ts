@@ -147,4 +147,15 @@ export class HotwashClient {
       { method: "POST" },
     );
   }
+
+  dismissSuggestion(suggestionId: number, reason?: string): Promise<SuggestionSummary> {
+    const init: RequestInit = { method: "POST" };
+    if (reason && reason.length > 0) {
+      init.body = JSON.stringify({ reason });
+    }
+    return this.request<SuggestionSummary>(
+      `/api/ingest/suggestions/${suggestionId}/dismiss`,
+      init,
+    );
+  }
 }

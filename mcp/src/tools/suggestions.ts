@@ -65,4 +65,40 @@ export function registerSuggestionTools(server: McpServer, client: HotwashClient
       }
     },
   );
+
+  server.tool(
+    "hotwash_dismiss_suggestion",
+    "Dismiss a pending ingest suggestion. Records the decision and anchors the cooldown window for that fingerprint, suppressing immediate re-fires of the same alert. Use when the suggestion is confirmed noise or otherwise should not become an execution. Reason is optional, max 500 chars, intentionally not persisted (only its presence and length are logged). Not reversible. Returns 409 if the suggestion is not pending. Destructive (transitions suggestion state and anchors cooldown): requires confirm: true.",
+    {
+      suggestion_id: z.number().int().positive(),
+      reason: z
+        .string()
+        .max(500)
+        .optional()
+        .describe("Optional human-readable reason. Not persisted; only whether a reason was provided and its length are logged."),
+      confirm: z
+        .literal(true)
+        .describe("Must be true. Acknowledges the suggestion will be dismissed and a cooldown anchor written for its fingerprint."),
+    },
+    async ({ suggestion_id, reason, confirm }) => {
+      if (!confirm) return refuseUnconfirmed("dismiss this suggestion");
+      try {
+        const row = await client.dismissSuggestion(suggestion_id, reason);
+        return ok({
+          id: row.id,
+          state: row.state,
+          mapping_id: row.mapping_id,
+          playbook_id: row.playbook_id,
+          rule_id: row.rule_id ?? null,
+          agent_name: row.agent_name ?? null,
+          description: row.description ?? null,
+          accepted_execution_id: row.accepted_execution_id ?? null,
+          created_at: row.created_at,
+          resolved_at: row.resolved_at ?? null,
+        });
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
 }

@@ -2,7 +2,7 @@
 
 Model Context Protocol server for [Hotwash](https://github.com/solomonneas/hotwash). Lets any MCP-capable LLM list playbooks, start runs against incidents, advance steps, attach evidence, query the timeline, and review the Wazuh ingest suggestion queue.
 
-Version 0.2.0 adds suggestion queue tools.
+Version 0.3.0 adds `hotwash_dismiss_suggestion`, completing the suggestion queue triage surface (list / get / accept / dismiss). Dismiss anchors the cooldown for that fingerprint, suppressing immediate re-fires of the same alert.
 
 ## What it exposes
 
@@ -17,6 +17,7 @@ Version 0.2.0 adds suggestion queue tools.
 | `hotwash_cancel_run` | Mark a run abandoned (requires `confirm: true`) |
 | `hotwash_list_suggestions` | List Wazuh ingest suggestions, filter by state or mapping_id (read-only) |
 | `hotwash_accept_suggestion` | Accept a pending suggestion, creating an Execution (requires `confirm: true`) |
+| `hotwash_dismiss_suggestion` | Dismiss a pending suggestion and anchor its cooldown (requires `confirm: true`) |
 
 ## Install
 
