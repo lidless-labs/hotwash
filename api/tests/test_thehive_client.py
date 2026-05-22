@@ -148,3 +148,126 @@ def test_status_propagates_auth_error():
         with pytest.raises(TheHiveError) as exc:
             client.status()
     assert exc.value.status_code == 401
+
+
+def test_create_case_posts_expected_payload():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(
+            201,
+            json_body={"_id": "~123", "number": 42, "title": "ransomware"},
+        )
+        result = client.create_case(
+            title="ransomware",
+            description="machine encrypted",
+            severity=3,
+            tlp=2,
+            pap=2,
+            tags=["wazuh", "ransom"],
+        )
+    args, kwargs = mocked.call_args
+    assert args[0] == "POST"
+    assert args[1] == "http://example:9000/api/v1/case"
+    assert kwargs["json"] == {
+        "title": "ransomware",
+        "description": "machine encrypted",
+        "severity": 3,
+        "tlp": 2,
+        "pap": 2,
+        "tags": ["wazuh", "ransom"],
+    }
+    assert result["_id"] == "~123"
+    assert result["number"] == 42
+
+
+def test_create_case_defaults_severity_tlp_pap():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~1"})
+        client.create_case(title="x", description="y")
+    _, kwargs = mocked.call_args
+    assert kwargs["json"]["severity"] == 2
+    assert kwargs["json"]["tlp"] == 2
+    assert kwargs["json"]["pap"] == 2
+    assert "tags" not in kwargs["json"] or kwargs["json"]["tags"] == []
+
+
+def test_create_alert_posts_expected_payload():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(
+            201,
+            json_body={"_id": "~A1", "sourceRef": "wazuh-23505-1"},
+        )
+        result = client.create_alert(
+            type="vulnerability",
+            source="wazuh",
+            source_ref="wazuh-23505-1",
+            title="CVE-2024-1234",
+            description="patch needed",
+            severity=2,
+            observables=[{"dataType": "hostname", "data": "host01"}],
+            tags=["cve"],
+        )
+    args, kwargs = mocked.call_args
+    assert args[1] == "http://example:9000/api/v1/alert"
+    body = kwargs["json"]
+    assert body["type"] == "vulnerability"
+    assert body["source"] == "wazuh"
+    assert body["sourceRef"] == "wazuh-23505-1"
+    assert body["title"] == "CVE-2024-1234"
+    assert body["observables"] == [{"dataType": "hostname", "data": "host01"}]
+    assert result["_id"] == "~A1"
+
+
+def test_create_alert_without_observables_omits_field():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~A2"})
+        client.create_alert(
+            type="t", source="s", source_ref="r", title="x", description="y"
+        )
+    body = mocked.call_args[1]["json"]
+    assert "observables" not in body
+
+
+def test_add_observable_posts_to_case_observable_endpoint():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~O1"})
+        result = client.add_observable(
+            case_id="~123",
+            data_type="ip",
+            data="1.2.3.4",
+            message="C2 server",
+            tlp=3,
+            ioc=True,
+            sighted=True,
+            tags=["c2"],
+        )
+    args, kwargs = mocked.call_args
+    assert args[1] == "http://example:9000/api/v1/case/~123/observable"
+    body = kwargs["json"]
+    assert body["dataType"] == "ip"
+    assert body["data"] == "1.2.3.4"
+    assert body["message"] == "C2 server"
+    assert body["tlp"] == 3
+    assert body["ioc"] is True
+    assert body["sighted"] is True
+    assert body["tags"] == ["c2"]
+    assert result["_id"] == "~O1"
+
+
+def test_add_observable_defaults():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~O2"})
+        client.add_observable(case_id="~123", data_type="domain", data="evil.com")
+    body = mocked.call_args[1]["json"]
+    assert body["dataType"] == "domain"
+    assert body["data"] == "evil.com"
+    assert body["tlp"] == 2
+    assert body["ioc"] is False
+    assert body["sighted"] is False
+    assert "message" not in body
+    assert "tags" not in body

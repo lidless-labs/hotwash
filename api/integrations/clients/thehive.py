@@ -131,3 +131,79 @@ class TheHiveClient:
             "user": user.get("login") or user.get("name") or "unknown",
             "stats": {},
         }
+
+    def create_case(
+        self,
+        *,
+        title: str,
+        description: str,
+        severity: int = 2,
+        tlp: int = 2,
+        pap: int = 2,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "tlp": tlp,
+            "pap": pap,
+        }
+        if tags:
+            payload["tags"] = tags
+        return self._request("POST", "/api/v1/case", json=payload)
+
+    def create_alert(
+        self,
+        *,
+        type: str,
+        source: str,
+        source_ref: str,
+        title: str,
+        description: str,
+        severity: int = 2,
+        tlp: int = 2,
+        pap: int = 2,
+        observables: list[dict[str, Any]] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": type,
+            "source": source,
+            "sourceRef": source_ref,
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "tlp": tlp,
+            "pap": pap,
+        }
+        if observables:
+            payload["observables"] = observables
+        if tags:
+            payload["tags"] = tags
+        return self._request("POST", "/api/v1/alert", json=payload)
+
+    def add_observable(
+        self,
+        *,
+        case_id: str,
+        data_type: str,
+        data: str,
+        message: str | None = None,
+        tlp: int = 2,
+        ioc: bool = False,
+        sighted: bool = False,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "dataType": data_type,
+            "data": data,
+            "tlp": tlp,
+            "ioc": ioc,
+            "sighted": sighted,
+        }
+        if message is not None:
+            payload["message"] = message
+        if tags:
+            payload["tags"] = tags
+        return self._request("POST", f"/api/v1/case/{case_id}/observable", json=payload)
