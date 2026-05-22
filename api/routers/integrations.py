@@ -15,6 +15,11 @@ from api.database import get_db
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
 from api.integrations.config import Integration
 from api.integrations.mock_data import MOCK_HANDLERS
+from api.integrations.schemas import (
+    AddObservableRequest,
+    CreateAlertRequest,
+    CreateCaseRequest,
+)
 from api.schemas import IntegrationOut, IntegrationUpdate
 from api.security import validate_integration_url
 
@@ -156,3 +161,101 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
     integration.last_checked = now
     db.commit()
     return {"tool": tool, "mock_mode": False, "result": {"status": integration.last_status}}
+
+
+def _build_thehive_client(integration: Integration) -> TheHiveClient:
+    """Validate state and construct a TheHiveClient, or raise HTTPException."""
+    if not integration.enabled:
+        raise HTTPException(status_code=400, detail="Integration disabled")
+    if integration.mock_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot run live action in mock mode",
+        )
+    if not integration.base_url:
+        raise HTTPException(status_code=400, detail="No base_url configured")
+    api_key_plain = decrypt_secret(integration.api_key)
+    if not api_key_plain:
+        raise HTTPException(status_code=400, detail="No API key configured")
+    validate_integration_url(integration.base_url)
+    return TheHiveClient(
+        base_url=integration.base_url,
+        api_key=api_key_plain,
+        verify_ssl=integration.verify_ssl,
+    )
+
+
+def _raise_for_thehive_error(exc: TheHiveError) -> None:
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "message": str(exc),
+            "upstream_status": exc.status_code,
+            "details": exc.details,
+        },
+    )
+
+
+@router.post("/integrations/thehive/actions/create_case")
+def thehive_create_case(payload: CreateCaseRequest, db: Session = Depends(get_db)):
+    integration = _get_integration(db, "thehive")
+    client = _build_thehive_client(integration)
+    try:
+        result = client.create_case(
+            title=payload.title,
+            description=payload.description,
+            severity=payload.severity,
+            tlp=payload.tlp,
+            pap=payload.pap,
+            tags=payload.tags,
+        )
+    except TheHiveError as exc:
+        _raise_for_thehive_error(exc)
+    case_id = result.get("_id")
+    number = result.get("number")
+    case_url = (
+        f"{integration.base_url.rstrip('/')}/cases/{number}/details" if number else None
+    )
+    return {"case_id": case_id, "number": number, "url": case_url, "raw": result}
+
+
+@router.post("/integrations/thehive/actions/create_alert")
+def thehive_create_alert(payload: CreateAlertRequest, db: Session = Depends(get_db)):
+    integration = _get_integration(db, "thehive")
+    client = _build_thehive_client(integration)
+    try:
+        result = client.create_alert(
+            type=payload.type,
+            source=payload.source,
+            source_ref=payload.source_ref,
+            title=payload.title,
+            description=payload.description,
+            severity=payload.severity,
+            tlp=payload.tlp,
+            pap=payload.pap,
+            observables=payload.observables,
+            tags=payload.tags,
+        )
+    except TheHiveError as exc:
+        _raise_for_thehive_error(exc)
+    return {"alert_id": result.get("_id"), "raw": result}
+
+
+@router.post("/integrations/thehive/actions/add_observable")
+def thehive_add_observable(payload: AddObservableRequest, db: Session = Depends(get_db)):
+    integration = _get_integration(db, "thehive")
+    client = _build_thehive_client(integration)
+    try:
+        result = client.add_observable(
+            case_id=payload.case_id,
+            data_type=payload.data_type,
+            data=payload.data,
+            message=payload.message,
+            tlp=payload.tlp,
+            ioc=payload.ioc,
+            sighted=payload.sighted,
+            tags=payload.tags,
+        )
+    except TheHiveError as exc:
+        _raise_for_thehive_error(exc)
+    return {"observable_id": result.get("_id"), "raw": result}
