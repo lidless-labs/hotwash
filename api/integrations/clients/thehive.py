@@ -107,3 +107,27 @@ class TheHiveClient:
                 status_code=resp.status_code,
                 details={"text": resp.text[:500]},
             ) from exc
+
+    def status(self) -> dict[str, Any]:
+        """Return {status, version, user, stats}.
+
+        Calls /api/v1/user/current (requires auth) and /api/v1/status (public on TheHive 5).
+        Raises TheHiveError on auth failure or connection issues.
+        """
+        user = self._request("GET", "/api/v1/user/current")
+        try:
+            status_info = self._request("GET", "/api/v1/status")
+        except TheHiveError:
+            status_info = {}
+
+        version = "unknown"
+        versions = status_info.get("versions") if isinstance(status_info, dict) else None
+        if isinstance(versions, dict):
+            version = versions.get("TheHive") or versions.get("thehive") or "unknown"
+
+        return {
+            "status": "connected",
+            "version": version,
+            "user": user.get("login") or user.get("name") or "unknown",
+            "stats": {},
+        }

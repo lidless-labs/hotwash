@@ -100,3 +100,51 @@ def test_request_handles_non_json_response_body():
         with pytest.raises(TheHiveError) as exc:
             client._request("GET", "/api/v1/status")
     assert "non-json" in str(exc.value).lower() or "invalid json" in str(exc.value).lower()
+
+
+def test_status_returns_connected_when_auth_ok():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+
+    def fake_request(method, url, **_):
+        if url.endswith("/api/v1/user/current"):
+            return _mock_response(200, json_body={"login": "admin@thehive.local", "name": "admin"})
+        if url.endswith("/api/v1/status"):
+            return _mock_response(
+                200,
+                json_body={"versions": {"TheHive": "5.4.0"}, "config": {}},
+            )
+        return _mock_response(404)
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        result = client.status()
+    assert result["status"] == "connected"
+    assert result["version"] == "5.4.0"
+    assert result["user"] == "admin@thehive.local"
+
+
+def test_status_handles_missing_version_field():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+
+    def fake_request(method, url, **_):
+        if url.endswith("/api/v1/user/current"):
+            return _mock_response(200, json_body={"login": "admin"})
+        if url.endswith("/api/v1/status"):
+            return _mock_response(200, json_body={"config": {}})
+        return _mock_response(404)
+
+    with patch.object(client._session, "request", side_effect=fake_request):
+        result = client.status()
+    assert result["status"] == "connected"
+    assert result["version"] == "unknown"
+
+
+def test_status_propagates_auth_error():
+    client = TheHiveClient(base_url="http://example:9000", api_key="bad")
+    with patch.object(
+        client._session,
+        "request",
+        return_value=_mock_response(401, json_body={"type": "AuthenticationError"}),
+    ):
+        with pytest.raises(TheHiveError) as exc:
+            client.status()
+    assert exc.value.status_code == 401
