@@ -12,20 +12,6 @@ from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
-_BLOCKED_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-]
-
-# 127/8 and 169.254/16 are ALWAYS blocked even if listed in the allowlist.
-_NEVER_ALLOWED = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-]
-
 _ALLOWED_NETWORKS: list[ipaddress._BaseNetwork] = []
 
 
@@ -48,17 +34,27 @@ def _reload_allowlist() -> None:
 _reload_allowlist()
 
 
+def _is_never_allowed(ip: ipaddress._BaseAddress) -> bool:
+    """Addresses that stay blocked even if the allowlist names them.
+
+    Covers IPv4 + IPv6 loopback, link-local, unspecified, and multicast.
+    Stdlib's IPv6Address.is_loopback / .is_link_local correctly classify
+    IPv4-mapped forms like ::ffff:127.0.0.1.
+    """
+    return ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast
+
+
 def _is_blocked_ip(host: str) -> bool:
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    # Never-allowed networks short-circuit regardless of allowlist.
-    if any(ip in network for network in _NEVER_ALLOWED):
+    if _is_never_allowed(ip):
         return True
     if any(ip in network for network in _ALLOWED_NETWORKS):
         return False
-    return any(ip in network for network in _BLOCKED_NETWORKS)
+    # Blocks RFC 1918 + RFC 4193 ULA (fc00::/7) + reserved ranges in both v4 and v6.
+    return ip.is_private or ip.is_reserved
 
 
 def validate_integration_url(url: str) -> str:

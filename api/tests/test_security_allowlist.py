@@ -50,6 +50,57 @@ def test_loopback_never_allowed_via_allowlist(monkeypatch):
     assert exc.value.status_code == 422
 
 
+def test_blocks_ipv6_loopback(monkeypatch):
+    monkeypatch.delenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", raising=False)
+    security._reload_allowlist()
+    with pytest.raises(HTTPException) as exc:
+        security.validate_integration_url("http://[::1]:9000")
+    assert exc.value.status_code == 422
+
+
+def test_blocks_ipv6_link_local(monkeypatch):
+    monkeypatch.delenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", raising=False)
+    security._reload_allowlist()
+    with pytest.raises(HTTPException) as exc:
+        security.validate_integration_url("http://[fe80::1]:9000")
+    assert exc.value.status_code == 422
+
+
+def test_blocks_ipv6_unique_local(monkeypatch):
+    """fc00::/7 (RFC 4193 ULA) is the v6 equivalent of RFC 1918."""
+    monkeypatch.delenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", raising=False)
+    security._reload_allowlist()
+    with pytest.raises(HTTPException) as exc:
+        security.validate_integration_url("http://[fc00::1]:9000")
+    assert exc.value.status_code == 422
+
+
+def test_ipv6_loopback_never_allowed_via_allowlist(monkeypatch):
+    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "::1/128")
+    security._reload_allowlist()
+    with pytest.raises(HTTPException) as exc:
+        security.validate_integration_url("http://[::1]:9000")
+    assert exc.value.status_code == 422
+
+
+def test_allows_listed_ipv6_ula(monkeypatch):
+    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "fc00::/7")
+    security._reload_allowlist()
+    assert (
+        security.validate_integration_url("http://[fc00::1]:9000")
+        == "http://[fc00::1]:9000"
+    )
+
+
+def test_ipv4_mapped_ipv6_loopback_blocked(monkeypatch):
+    """::ffff:127.0.0.1 is IPv4-mapped loopback; must also be blocked."""
+    monkeypatch.delenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", raising=False)
+    security._reload_allowlist()
+    with pytest.raises(HTTPException) as exc:
+        security.validate_integration_url("http://[::ffff:127.0.0.1]:9000")
+    assert exc.value.status_code == 422
+
+
 @pytest.fixture(autouse=True)
 def _reset_allowlist_after_test(monkeypatch):
     yield
