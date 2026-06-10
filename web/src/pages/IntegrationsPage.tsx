@@ -4,6 +4,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useHashRouter } from '../router';
+import { parseApiDate } from '../lib/time';
 
 const API_BASE = 'http://localhost:8000/api';
 
@@ -200,7 +201,7 @@ const IntegrationsPage: React.FC = () => {
 
                 {i.last_checked && (
                   <p className="text-xs text-slate-500">
-                    Last checked: {new Date(i.last_checked).toLocaleString()}
+                    Last checked: {parseApiDate(i.last_checked).toLocaleString()}
                   </p>
                 )}
 

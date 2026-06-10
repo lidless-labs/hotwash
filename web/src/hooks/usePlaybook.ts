@@ -9,6 +9,7 @@ import { PlaybookLibraryItem, PlaybookMetadata, PlaybookGraph, PlaybookCategory 
 import { allPlaybooks } from '../data';
 import { getPlaybook, ApiPlaybook } from '../api/client';
 import { parseMarkdown } from '../parsers/markdownParser';
+import { parseApiDate } from '../lib/time';
 
 export interface UsePlaybookResult {
   /** The playbook data, or undefined if slug doesn't match */
@@ -91,7 +92,7 @@ function formatCategoryLabel(category?: string): string {
 
 function formatUpdatedDate(updatedAt?: string): string | undefined {
   if (!updatedAt) return undefined;
-  const date = new Date(updatedAt);
+  const date = parseApiDate(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
   return date.toLocaleDateString();
 }

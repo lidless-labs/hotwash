@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useHashRouter } from '../router';
 import { API_BASE_URL, API_KEY } from '../api/client';
 import { useExecutionSocket } from '../hooks/useExecutionSocket';
-import { relativeTime } from '../lib/time';
+import { parseApiDate, relativeTime } from '../lib/time';
 
 interface Step {
   node_id: string;
@@ -133,8 +133,8 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
   useEffect(() => {
     if (!execution?.started_at) return;
     const update = () => {
-      const end = execution.completed_at ? new Date(execution.completed_at).getTime() : Date.now();
-      setElapsedStr(formatDuration(end - new Date(execution.started_at).getTime()));
+      const end = execution.completed_at ? parseApiDate(execution.completed_at).getTime() : Date.now();
+      setElapsedStr(formatDuration(end - parseApiDate(execution.started_at).getTime()));
     };
     update();
     if (!execution.completed_at) {
@@ -333,8 +333,8 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
                       const isExecute = step.node_type === 'execute' || step.node_type === 'action';
                       let duration = '';
                       if (step.started_at) {
-                        const end = step.completed_at ? new Date(step.completed_at).getTime() : Date.now();
-                        duration = formatDuration(end - new Date(step.started_at).getTime());
+                        const end = step.completed_at ? parseApiDate(step.completed_at).getTime() : Date.now();
+                        duration = formatDuration(end - parseApiDate(step.started_at).getTime());
                       }
                       return (
                         <div

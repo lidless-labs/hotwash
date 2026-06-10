@@ -5,7 +5,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useHashRouter } from '../router';
 import { API_BASE_URL, API_KEY } from '../api/client';
-import { relativeTime } from '../lib/time';
+import { parseApiDate, relativeTime } from '../lib/time';
 
 interface Execution {
   id: string;
@@ -140,7 +140,7 @@ const ExecutionsPage: React.FC = () => {
     let avgTime = '—';
     if (completedExecs.length > 0) {
       const total = completedExecs.reduce((sum, e) => {
-        return sum + (new Date(e.completed_at!).getTime() - new Date(e.started_at).getTime());
+        return sum + (parseApiDate(e.completed_at!).getTime() - parseApiDate(e.started_at).getTime());
       }, 0);
       const avgMs = total / completedExecs.length;
       if (avgMs < 3600000) avgTime = `${Math.round(avgMs / 60000)}m`;

@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { useHashRouter } from '../router';
 import { API_BASE_URL, API_KEY } from '../api/client';
+import { parseApiDate } from '../lib/time';
 
 interface ReportData {
   execution: {
@@ -39,7 +40,7 @@ interface ReportData {
 
 function formatDuration(start: string, end?: string): string {
   if (!end) return '—';
-  const ms = new Date(end).getTime() - new Date(start).getTime();
+  const ms = parseApiDate(end).getTime() - parseApiDate(start).getTime();
   if (ms < 60000) return `${Math.round(ms / 1000)}s`;
   if (ms < 3600000) return `${Math.floor(ms / 60000)}m`;
   return `${(ms / 3600000).toFixed(1)}h`;
@@ -188,7 +189,7 @@ const ReportPage: React.FC<ReportPageProps> = ({ executionId }) => {
               <div className="flex flex-col gap-2">
                 {report.timeline.map((ev, i) => (
                   <div key={i} className="flex items-start gap-3 text-sm">
-                    <span className="text-xs text-slate-500 whitespace-nowrap w-20">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                    <span className="text-xs text-slate-500 whitespace-nowrap w-20">{parseApiDate(ev.timestamp).toLocaleTimeString()}</span>
                     <span className="text-slate-300">{ev.description}</span>
                   </div>
                 ))}

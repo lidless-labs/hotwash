@@ -8,6 +8,7 @@ import { listPlaybooks, deletePlaybook, listSuggestions, ApiPlaybookSummary } fr
 import { allPlaybooks } from '../data';
 import { PlaybookLibraryItem } from '../types';
 import AIImprovePanel from '../components/AIImprovePanel';
+import { parseApiDate } from '../lib/time';
 
 interface LibraryPlaybook {
   id: string;
@@ -421,7 +422,7 @@ function formatCategoryLabel(category?: string): string {
 
 function formatUpdatedDate(updatedAt?: string): string | undefined {
   if (!updatedAt) return undefined;
-  const date = new Date(updatedAt);
+  const date = parseApiDate(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
   return date.toLocaleDateString();
 }
