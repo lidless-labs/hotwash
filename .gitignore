@@ -1,4 +1,6 @@
 # Personal AI context - DO NOT COMMIT
+.claude/
+docs/superpowers/
 BOOTSTRAP.md
 SOUL.md
 IDENTITY.md

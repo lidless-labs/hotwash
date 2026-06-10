@@ -1,5 +1,8 @@
 # TheHive Integration
 
+<!-- Example IPs below are illustrative private-range placeholders. -->
+<!-- content-guard: allow private-ipv4 file -->
+
 Tested against TheHive **5.4**.
 
 ## What it does
