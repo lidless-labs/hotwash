@@ -22,27 +22,45 @@ Add an `<integration>` block to `/var/ossec/etc/ossec.conf`:
 ```
 
 The integration script must send `X-Hotwash-Mapping-Id` and
-`X-Hotwash-Signature` headers. Template for
-`/var/ossec/integrations/custom-hotwash.py`:
+`X-Hotwash-Signature` headers. Hotwash verifies the signature against the
+claimed mapping's secret and re-matches the alert against that mapping
+only, so a forwarder that serves several mappings has to route each alert
+to the mapping that owns its rule id. Template for
+`/var/ossec/integrations/custom-hotwash.py` (pair it with a copy of one of
+the stock `/var/ossec/integrations/` shell wrappers named `custom-hotwash`,
+both `root:wazuh` mode `750`):
 
 ```python
 #!/usr/bin/env python3
 import hashlib, hmac, json, sys, urllib.request
 
 ALERT_FILE, _, HOOK_URL = sys.argv[1], sys.argv[2], sys.argv[3]
-MAPPING_ID = "1"
-SECRET = b"replace-with-mapping-secret"
+SECRET = "replace-with-mapping-secret"  # content-guard: allow api-key-assignment
+ROUTES = {
+    "23505": "1",  # rule_id -> mapping_id
+    "5710": "2",
+}
 
 with open(ALERT_FILE, "rb") as f:
     body = f.read()
-sig = hmac.new(SECRET, body, hashlib.sha256).hexdigest()
+
+rule_id = str(json.loads(body).get("rule", {}).get("id", ""))
+mapping_id = ROUTES.get(rule_id)
+if mapping_id is None:
+    sys.exit(0)  # not ours; keep ossec.conf <rule_id> as the noise filter
+
+sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
 req = urllib.request.Request(HOOK_URL, data=body, method="POST", headers={
     "Content-Type": "application/json",
-    "X-Hotwash-Mapping-Id": MAPPING_ID,
+    "X-Hotwash-Mapping-Id": mapping_id,
     "X-Hotwash-Signature": "sha256=" + sig,
 })
 urllib.request.urlopen(req, timeout=10).read()
 ```
+
+Keep the `<rule_id>` list in the `<integration>` block and the `ROUTES`
+table in sync; the block decides which alerts reach the script, the table
+decides which mapping signs and receives each one.
 
 ## Creating a mapping
 
