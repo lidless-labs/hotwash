@@ -76,7 +76,7 @@ Backend: **http://localhost:8000** (optional)
 | **Canvas** | React Flow Renderer 10.3 | Node-edge graph visualization |
 | **State** | Zustand | Global state management |
 | **Bundler** | Vite 5 | Dev server and build |
-| **Backend** (Optional) | FastAPI 0.109 | Playbook generation and storage |
+| **Backend** (Optional) | FastAPI 0.136 | Playbook storage, execution engine, integrations |
 | **Parser** | Custom Markdown Parser | Inline playbook parsing |
 
 ---
