@@ -4,16 +4,18 @@
 language: en-US
 
 reviews:
-  # Auto-review every PR
+  # Manual review only. Ask for a review with `@coderabbitai review` after a
+  # meaningful code PR is ready. This avoids burning org/account review limits
+  # on docs-only, tiny, draft, or fast-follow PRs.
   auto_review:
-    enabled: true
+    enabled: false
     drafts: false  # Skip draft PRs
     base_branches:
       - main
       - master
   
-  # Review profile - thorough but not noisy
-  profile: assertive
+  # Keep default reviews quieter; local Codex/coder review runs first.
+  profile: chill
   
   # What to focus on
   path_instructions:
@@ -45,10 +47,11 @@ reviews:
   collapse_walkthrough: true
 
 chat:
-  auto_reply: true
+  auto_reply: false
 
 tone_instructions: |
   Be direct and constructive. Skip praise for obvious things.
   Focus on bugs, security issues, and performance problems.
   Suggest specific fixes with code snippets when possible.
+  Ignore purely cosmetic churn, broad refactor preferences, and docs-only wording unless it creates a real user, build, security, accessibility, or maintainability problem.
   Never use em dashes. Use commas, periods, or colons instead.
