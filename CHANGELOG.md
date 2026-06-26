@@ -3,9 +3,16 @@
 All notable changes to Hotwash. The `hotwash-mcp` npm package keeps its own
 version line (`mcp-v*` tags); entries here cover the whole repo.
 
-## Unreleased
+## [Unreleased]
 
 ### Added
+- Maintainer-health docs: `SECURITY.md`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, GitHub issue templates (bug + feature), an issue
+  config that disables blank issues and links the website and security
+  policy, and a pull-request template with a no-PII / content-guard check.
+- README rewritten lead-first around the incident-response + MCP
+  differentiator, with a website link, a copyable MCP client config block,
+  and the full verified `hotwash_*` tool list.
 - Tag-triggered npm publish job for `hotwash-mcp` (tags `mcp-v*` / `v*`)
   with a skip-if-already-published guard and npm provenance.
 - `HOTWASH_CORS_ORIGINS` env var: CORS origins are now configurable, with

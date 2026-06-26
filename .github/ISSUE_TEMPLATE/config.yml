@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Website and overview
+    url: https://lidless.dev/hotwash
+    about: What Hotwash is, screenshots, and where it fits. Start here before filing.
+  - name: hotwash-mcp on npm
+    url: https://www.npmjs.com/package/hotwash-mcp
+    about: The published MCP server package, install instructions, and version history.
+  - name: Security report
+    url: https://github.com/solomonneas/hotwash/security/policy
+    about: Do not file security issues publicly. See SECURITY.md for how to report a vulnerability.
