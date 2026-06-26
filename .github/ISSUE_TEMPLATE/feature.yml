@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a new capability for Hotwash - a runbook feature, a new MCP tool, a SOAR action, an integration, or a parser improvement.
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Hotwash would this touch?
+      options:
+        - Web app (React frontend)
+        - Backend (run engine / REST API)
+        - hotwash-mcp (MCP tools)
+        - Wazuh ingest
+        - Playbook authoring / parsers
+        - SOAR actions / integrations
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What incident-response or SOC workflow is awkward or impossible today?
+      placeholder: |
+        When an agent triages the suggestion queue, it cannot tell which mapping a row came from without...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Hotwash to do? If it is a new MCP tool, sketch the inputs and outputs.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you have tried, or other tools that do this today.
+    validations:
+      required: false
+  - type: checkboxes
+    id: surface
+    attributes:
+      label: Surface check
+      description: Hotwash is WIP and the REST/MCP surface is still moving. Some changes need a conversation first (see CONTRIBUTING.md).
+      options:
+        - label: This may change the REST API shape, an MCP tool name/semantics, or the Wazuh ingest contract, and I am opening this to discuss before sending a PR.
+          required: false

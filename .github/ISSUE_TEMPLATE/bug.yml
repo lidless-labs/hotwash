@@ -1,0 +1,76 @@
+name: Bug report
+description: Something is broken in Hotwash - the web app, the FastAPI backend, the MCP server, Wazuh ingest, or the parsers.
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where does the problem show up?
+      options:
+        - Web app (React frontend)
+        - Backend (FastAPI run engine / REST API)
+        - hotwash-mcp (MCP server)
+        - Wazuh ingest
+        - Playbook parser (Markdown / Mermaid)
+        - SOAR integration (TheHive, etc.)
+        - Docs
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did you expect versus what you got?
+      placeholder: |
+        I started a run with hotwash_start_run, then called hotwash_query_run and got X.
+        I expected Y.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps, requests, or tool calls. A minimal playbook or sample input helps a lot.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Hotwash version / commit
+      description: Git commit you tested against, or the `hotwash-mcp` version if it is an MCP issue.
+      placeholder: commit abc1234, or hotwash-mcp 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime versions
+      description: Whatever is relevant - Python, Node, browser.
+      placeholder: Python 3.12.3, Node 22.4.0, Chrome 140
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: Ubuntu 24.04, macOS 14.5, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Full output / logs
+      description: Paste the full stdout + stderr or the error response. Redact secrets, tokens, private hostnames, and personal paths, but keep enough for us to reproduce.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: scrub
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I have removed any secrets, tokens, private hostnames, real private IPs, and personal paths from this report.
+          required: true
