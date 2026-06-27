@@ -1,20 +1,11 @@
 <p align="center">
-  <img src="docs/assets/hotwash-banner.jpg" alt="Hotwash banner">
+  <img src="docs/assets/hotwash-banner.jpg" alt="hotwash banner" width="900">
 </p>
 
 <h1 align="center">⚒️ Hotwash</h1>
 
 <p align="center">
   <strong>Interactive incident-response runbooks: build IR playbooks as visual flowcharts, execute them step-by-step, and drive whole runs from an LLM over MCP.</strong>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/solomonneas/hotwash/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/npm/v/hotwash-mcp?style=for-the-badge&label=hotwash-mcp&logo=npm" alt="hotwash-mcp on npm">
-  <img src="https://img.shields.io/badge/MCP-server-7c3aed?style=for-the-badge" alt="MCP server">
-  <img src="https://img.shields.io/badge/React-18.2-61DAFB?style=for-the-badge&logo=react&logoColor=0f172a" alt="React 18.2">
-  <img src="https://img.shields.io/badge/FastAPI-0.136-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI 0.136">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
 </p>
 
 <p align="center">
@@ -25,6 +16,14 @@
   <a href="docs/WAZUH-INGEST.md">Wazuh ingest</a>
   &nbsp;·&nbsp;
   <a href="docs/ROADMAP.md">Roadmap</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/lidless-labs/hotwash/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
+  <img src="https://img.shields.io/npm/v/hotwash-mcp?style=for-the-badge&label=hotwash-mcp&logo=npm" alt="hotwash-mcp on npm">
+  <img src="https://img.shields.io/badge/React-18.2-61DAFB?style=for-the-badge&logo=react&logoColor=0f172a" alt="React 18.2">
+  <img src="https://img.shields.io/badge/FastAPI-0.136-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI 0.136">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
 </p>
 
 Hotwash turns incident-response (IR) playbooks written in Markdown or Mermaid into interactive flowchart runbooks with a real execution engine, so a SOC analyst can build a runbook, kick off a run against a live incident, and track every step, decision, and piece of evidence. The point is that the same run is also drivable by an AI agent: the bundled `hotwash-mcp` Model Context Protocol server exposes the run engine as tools, so an LLM can list playbooks, start a run, advance steps, attach artifacts, and triage the Wazuh ingest queue. Unlike a static playbook doc or a flowchart drawing tool, every Hotwash run is live, audited state that a human and an agent can share.
@@ -42,6 +41,28 @@ Hotwash is an incident-response (IR) runbook tool for SOC and blue-team work. It
 - **Automation.** The `hotwash-mcp` MCP server lets an AI agent drive runs end to end, and the Wazuh ingest path turns alerts into either an auto-started run or a human-review suggestion via HMAC-authenticated mappings.
 
 Keywords: incident response, IR runbooks, SOC, SOAR, playbook automation, Model Context Protocol (MCP), Wazuh alert ingestion, blue team.
+
+---
+
+## Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/lidless-labs/hotwash.git
+cd hotwash
+
+# Frontend (web app)
+cd web && npm install && npm run dev
+
+# Backend (run engine + REST API + MCP backend, from the repo root)
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn api.main:app --port 8000
+```
+
+Frontend: **http://localhost:5177**
+Backend: **http://localhost:8000**
+
+The web app works offline for visualization without the backend. The backend is required for the execution engine, the REST API, the MCP server, and Wazuh ingest.
 
 ---
 
@@ -86,44 +107,6 @@ The server registers 10 tools, all prefixed `hotwash_`:
 | `hotwash_dismiss_suggestion` | Dismiss a pending suggestion as noise and anchor the mapping cooldown. Destructive; requires `confirm: true`. |
 
 Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) refuse to act unless the caller passes `confirm: true`, so an agent cannot abandon a run or burn through the suggestion queue by accident.
-
----
-
-## Quick Start
-
-```bash
-# Clone and install
-git clone https://github.com/solomonneas/hotwash.git
-cd hotwash
-
-# Frontend (web app)
-cd web && npm install && npm run dev
-
-# Backend (run engine + REST API + MCP backend, from the repo root)
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn api.main:app --port 8000
-```
-
-Frontend: **http://localhost:5177**
-Backend: **http://localhost:8000**
-
-The web app works offline for visualization without the backend. The backend is required for the execution engine, the REST API, the MCP server, and Wazuh ingest.
-
----
-
-## Why not just a Markdown doc or a flowchart tool?
-
-- **vs. a playbook in a wiki or Markdown file:** a doc is read-only prose. Hotwash runs the playbook: live step status, timestamps, assignees, decisions, and attached evidence become queryable state and an audit trail, not a checklist someone re-types into a ticket.
-- **vs. a diagram tool (Mermaid Live, draw.io, Lucidchart):** those draw the flowchart and stop there. Hotwash parses the same Markdown/Mermaid into a graph *and* executes it, with an engine, a run history, and an MCP surface an agent can drive.
-- **vs. a full commercial SOAR platform:** Hotwash is a local-first, MIT-licensed, self-hosted runbook engine you can read and extend. SOAR actions ship as customizable templates; the design is human-and-agent in the loop, not a black box that fires playbooks autonomously.
-
-## What Hotwash is not
-
-- Not a SIEM and not a detection engine. It ingests Wazuh alerts; it does not generate them.
-- Not a turnkey SOAR with vendor integrations for every tool. SOAR actions (`isolate_host`, `block_ioc`, and friends) are templates teams customize; TheHive is the one live integration today.
-- Not a hosted or multi-tenant service. It is a self-hosted app you run yourself.
-- Not a fully autonomous responder. Destructive MCP tools require explicit confirmation, and `mode=suggest` Wazuh mappings route to a human-review queue by design.
-- Not finished. It is WIP; expect the surface to change.
 
 ---
 
@@ -306,6 +289,22 @@ for the integration script template, HMAC scheme, and cooldown semantics.
 Shipped: the `hotwash-mcp` Model Context Protocol server (on npm) that lets AI agents drive playbook runs, and the Wazuh alert ingestion path with HMAC auth, mapping rules, and a human-review suggestion queue. Next up: richer execution reporting, more SOAR targets beyond TheHive, and deeper suggestion-queue workflows.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
+
+---
+
+## Why not just a Markdown doc or a flowchart tool?
+
+- **vs. a playbook in a wiki or Markdown file:** a doc is read-only prose. Hotwash runs the playbook: live step status, timestamps, assignees, decisions, and attached evidence become queryable state and an audit trail, not a checklist someone re-types into a ticket.
+- **vs. a diagram tool (Mermaid Live, draw.io, Lucidchart):** those draw the flowchart and stop there. Hotwash parses the same Markdown/Mermaid into a graph *and* executes it, with an engine, a run history, and an MCP surface an agent can drive.
+- **vs. a full commercial SOAR platform:** Hotwash is a local-first, MIT-licensed, self-hosted runbook engine you can read and extend. SOAR actions ship as customizable templates; the design is human-and-agent in the loop, not a black box that fires playbooks autonomously.
+
+## What Hotwash is not
+
+- Not a SIEM and not a detection engine. It ingests Wazuh alerts; it does not generate them.
+- Not a turnkey SOAR with vendor integrations for every tool. SOAR actions (`isolate_host`, `block_ioc`, and friends) are templates teams customize; TheHive is the one live integration today.
+- Not a hosted or multi-tenant service. It is a self-hosted app you run yourself.
+- Not a fully autonomous responder. Destructive MCP tools require explicit confirmation, and `mode=suggest` Wazuh mappings route to a human-review queue by design.
+- Not finished. It is WIP; expect the surface to change.
 
 ---
 
