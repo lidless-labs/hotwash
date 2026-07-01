@@ -19,11 +19,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/lidless-labs/hotwash/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/npm/v/hotwash-mcp?style=for-the-badge&label=hotwash-mcp&logo=npm" alt="hotwash-mcp on npm">
-  <img src="https://img.shields.io/badge/React-18.2-61DAFB?style=for-the-badge&logo=react&logoColor=0f172a" alt="React 18.2">
-  <img src="https://img.shields.io/badge/FastAPI-0.136-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI 0.136">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+  <img src="https://shieldcn.dev/github/ci/lidless-labs/hotwash.svg?branch=main&workflow=ci.yml" alt="CI status">
+  <img src="https://shieldcn.dev/npm/hotwash-mcp.svg" alt="hotwash-mcp on npm">
+  <img src="https://shieldcn.dev/badge/React-18.2-61DAFB.svg?logo=react&logoColor=0f172a" alt="React 18.2">
+  <img src="https://shieldcn.dev/badge/FastAPI-0.136-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI 0.136">
+  <img src="https://shieldcn.dev/badge/license-MIT-green.svg" alt="MIT license">
 </p>
 
 Hotwash turns incident-response (IR) playbooks written in Markdown or Mermaid into interactive flowchart runbooks with a real execution engine, so a SOC analyst can build a runbook, kick off a run against a live incident, and track every step, decision, and piece of evidence. The point is that the same run is also drivable by an AI agent: the bundled `hotwash-mcp` Model Context Protocol server exposes the run engine as tools, so an LLM can list playbooks, start a run, advance steps, attach artifacts, and triage the Wazuh ingest queue. Unlike a static playbook doc or a flowchart drawing tool, every Hotwash run is live, audited state that a human and an agent can share.
