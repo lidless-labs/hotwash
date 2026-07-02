@@ -2,9 +2,19 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - '.gitignore'
     branches: [main]
     tags: ["v*", "mcp-v*"]
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
   verify:
