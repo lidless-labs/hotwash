@@ -30,7 +30,8 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_api_key, is_valid_api_key
 from api.database import get_db, SessionLocal
-from api.orm_models import Execution, ExecutionEvent, Playbook
+from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
+from api.services import replay
 from api.schemas import (
     ExecutionCreate,
     ExecutionDetail,
@@ -109,6 +110,66 @@ def _record_event(
     db.add(event)
     db.flush()
     return event
+
+
+def _record_run_event(
+    db: Session,
+    execution: Execution,
+    event_type: str,
+    payload: Dict[str, Any],
+) -> RunEvent:
+    """Append a structured, replayable event alongside the prose timeline event.
+
+    ActiveGraph-inspired: these carry machine payloads sufficient to replay the
+    run's step state (see api/services/replay.py). Emitted in addition to the
+    existing steps_json write, so normal reads are unaffected and the projection
+    can be diffed against steps_json as a correctness oracle.
+    """
+    event = RunEvent(
+        execution_id=execution.id,
+        event_type=event_type,
+        payload_json=json.dumps(payload),
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def _run_event_dicts(db: Session, execution_id: int, up_to_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Load an execution's run events in order as plain dicts for the reducer."""
+    query = db.query(RunEvent).filter(RunEvent.execution_id == execution_id)
+    if up_to_id is not None:
+        query = query.filter(RunEvent.id <= up_to_id)
+    rows = query.order_by(RunEvent.id).all()
+    events: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row.payload_json) if row.payload_json else {}
+        except json.JSONDecodeError:
+            payload = {}
+        events.append({"id": row.id, "event_type": row.event_type, "payload": payload})
+    return events
+
+
+def _diff_step_state(a: Execution, b: Execution) -> Dict[str, Any]:
+    """Structural diff of two runs' step state, keyed by node id."""
+    steps_a = {s.get("node_id"): s for s in load_steps(a)}
+    steps_b = {s.get("node_id"): s for s in load_steps(b)}
+    fields = ["status", "assignee", "decision_taken", "notes", "evidence"]
+    differences: List[Dict[str, Any]] = []
+    for node_id in sorted(set(steps_a) | set(steps_b), key=lambda n: str(n)):
+        x = steps_a.get(node_id)
+        y = steps_b.get(node_id)
+        if x is None:
+            differences.append({"node_id": node_id, "issue": "only-in-b"})
+            continue
+        if y is None:
+            differences.append({"node_id": node_id, "issue": "only-in-a"})
+            continue
+        field_diffs = {f: {"a": x.get(f), "b": y.get(f)} for f in fields if x.get(f) != y.get(f)}
+        if field_diffs:
+            differences.append({"node_id": node_id, "issue": "differs", "fields": field_diffs})
+    return {"a": a.id, "b": b.id, "identical": not differences, "differences": differences}
 
 
 async def _broadcast(execution_id: int, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
@@ -310,6 +371,9 @@ async def create_execution(payload: ExecutionCreate, db: Session = Depends(get_d
         description=f"Execution started for playbook '{playbook.title}'",
         actor=payload.started_by,
     )
+    # Genesis lives in the run_started event, so replay reproduces the exact
+    # initial step state without depending on the (mutable) playbook graph.
+    _record_run_event(db, execution, replay.RUN_STARTED, {"genesis": steps})
     db.commit()
     db.refresh(execution)
 
@@ -367,10 +431,12 @@ async def update_execution(
         }
         event_type, description = event_map.get(payload.status, ("execution_updated", f"Status changed to {payload.status}"))
         _record_event(db, execution, event_type=event_type, description=description)
+        _record_run_event(db, execution, replay.EXECUTION_STATUS_CHANGED, {"status": payload.status})
 
     if payload.notes is not None:
         execution.notes = payload.notes
         _record_event(db, execution, event_type="notes_updated", description="Execution notes updated")
+        _record_run_event(db, execution, replay.EXECUTION_NOTES_UPDATED, {})
 
     db.commit()
     db.refresh(execution)
@@ -403,6 +469,10 @@ async def update_step(
 
     now = datetime.now(timezone.utc).isoformat()
     events_to_emit: List[tuple[str, str]] = []
+    # Structured, replayable counterparts to the prose events above. Carrying the
+    # same `now` timestamp for started_at/completed_at lets the reducer reproduce
+    # steps_json byte-for-byte.
+    run_events_to_emit: List[tuple[str, Dict[str, Any]]] = []
 
     if payload.status is not None:
         if payload.status not in VALID_STEP_STATUSES:
@@ -416,24 +486,32 @@ async def update_step(
             step["completed_at"] = now
             label = "completed" if payload.status == "completed" else "skipped"
             events_to_emit.append(("step_completed", f"Step '{step.get('node_label')}' {label}"))
+        run_events_to_emit.append(
+            (replay.STEP_STATUS_CHANGED, {"node_id": node_id, "status": payload.status, "at": now})
+        )
 
     if payload.assignee is not None:
         step["assignee"] = payload.assignee or None
         events_to_emit.append(("assignee_changed", f"Assignee set to {payload.assignee or 'unassigned'} for '{step.get('node_label')}'"))
+        run_events_to_emit.append((replay.STEP_ASSIGNEE_CHANGED, {"node_id": node_id, "assignee": payload.assignee or None}))
 
     if payload.notes:
         existing_notes = list(step.get("notes") or [])
         existing_notes.append(payload.notes)
         step["notes"] = existing_notes
         events_to_emit.append(("note_added", f"Note added to '{step.get('node_label')}'"))
+        run_events_to_emit.append((replay.STEP_NOTE_ADDED, {"node_id": node_id, "note": payload.notes}))
 
     if payload.decision_taken is not None:
         step["decision_taken"] = payload.decision_taken
         events_to_emit.append(("decision_taken", f"Decision '{payload.decision_taken}' on '{step.get('node_label')}'"))
+        run_events_to_emit.append((replay.STEP_DECISION_TAKEN, {"node_id": node_id, "decision": payload.decision_taken}))
 
     execution.steps_json = serialize_steps(steps)
     for event_type, description in events_to_emit:
         _record_event(db, execution, event_type=event_type, description=description)
+    for run_event_type, run_payload in run_events_to_emit:
+        _record_run_event(db, execution, run_event_type, run_payload)
 
     db.commit()
     db.refresh(execution)
@@ -473,12 +551,13 @@ async def upload_evidence(
     target_path.write_bytes(body)
 
     uploaded_at = datetime.now(timezone.utc).isoformat()
-    evidence_list = list(step.get("evidence") or [])
-    evidence_list.append({
+    entry = {
         "filename": stored_name,
         "size": len(body),
         "uploaded_at": uploaded_at,
-    })
+    }
+    evidence_list = list(step.get("evidence") or [])
+    evidence_list.append(entry)
     step["evidence"] = evidence_list
 
     execution.steps_json = serialize_steps(steps)
@@ -488,6 +567,7 @@ async def upload_evidence(
         event_type="evidence_attached",
         description=f"Evidence '{stored_name}' attached to '{step.get('node_label')}'",
     )
+    _record_run_event(db, execution, replay.STEP_EVIDENCE_ATTACHED, {"node_id": node_id, "evidence": entry})
     db.commit()
     await _broadcast(execution.id, "evidence_attached", {"node_id": node_id, "filename": stored_name})
     return ExecutionStep(**step)
@@ -526,6 +606,84 @@ def get_execution_report_markdown(execution_id: int, db: Session = Depends(get_d
         content=_report_to_markdown(_build_report(execution)),
         media_type="text/markdown",
     )
+
+
+@router.get("/executions/{execution_id}/replay")
+def replay_execution(execution_id: int, db: Session = Depends(get_db)):
+    """Rebuild step state from the run_events log and report whether it matches.
+
+    The built-in correctness oracle for the event stream: if ``matches_persisted``
+    is ever false, the reducer and the router's mutation rules have drifted.
+    """
+    execution = _ensure_execution(db, execution_id)
+    events = _run_event_dicts(db, execution.id)
+    projected = replay.build_steps(events)
+    persisted = load_steps(execution)
+    return {
+        "execution_id": execution.id,
+        "event_count": len(events),
+        "matches_persisted": projected == persisted,
+        "steps": projected,
+    }
+
+
+@router.post("/executions/{execution_id}/fork", response_model=ExecutionSummary, status_code=status.HTTP_201_CREATED)
+async def fork_execution(
+    execution_id: int,
+    at_event_id: Optional[int] = Query(default=None, description="Fork at this run_event id (default: latest)."),
+    db: Session = Depends(get_db),
+):
+    """Branch a run at a chosen event and replay it into a new execution.
+
+    ActiveGraph-inspired fork: copy the run_events up to the cut point into a new
+    execution and replay them to seed its step state. The fork diverges freely
+    without touching the parent. Genesis travels in the copied run_started event.
+    """
+    execution = _ensure_execution(db, execution_id)
+    events = _run_event_dicts(db, execution.id, up_to_id=at_event_id)
+    if not events:
+        raise HTTPException(status_code=400, detail="No run events to fork from")
+
+    projected = replay.build_steps(events)
+    fork = Execution(
+        playbook_id=execution.playbook_id,
+        incident_title=f"{execution.incident_title} (fork)",
+        incident_id=execution.incident_id,
+        started_by=execution.started_by,
+        status="active",
+        steps_json=serialize_steps(projected),
+        context_json=execution.context_json,
+    )
+    db.add(fork)
+    db.flush()
+
+    for event in events:
+        _record_run_event(db, fork, event["event_type"], event["payload"])
+    cut_id = events[-1]["id"]
+    _record_run_event(
+        db, fork, replay.RUN_FORKED, {"parent_execution_id": execution.id, "forked_from_event_id": cut_id}
+    )
+    _record_event(
+        db,
+        fork,
+        event_type="forked_from",
+        description=f"Forked from execution {execution.id} at event {cut_id}",
+    )
+    db.commit()
+    db.refresh(fork)
+
+    steps = load_steps(fork)
+    summary = _summary(fork, steps)
+    await _broadcast(fork.id, "execution_started", {"execution_id": fork.id, "forked_from": execution.id})
+    return summary
+
+
+@router.get("/executions/{execution_id}/diff/{other_id}")
+def diff_executions(execution_id: int, other_id: int, db: Session = Depends(get_db)):
+    """Structurally compare two runs' step state (e.g. a fork against its parent)."""
+    a = _ensure_execution(db, execution_id)
+    b = _ensure_execution(db, other_id)
+    return _diff_step_state(a, b)
 
 
 @ws_router.websocket("/executions/{execution_id}/live")
