@@ -166,6 +166,12 @@ class Execution(Base):
         cascade="all, delete-orphan",
         order_by="ExecutionEvent.timestamp.desc()",
     )
+    run_events: Mapped[List["RunEvent"]] = relationship(
+        "RunEvent",
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        order_by="RunEvent.id",
+    )
 
     __table_args__ = (
         Index("ix_executions_status", "status"),
@@ -197,6 +203,38 @@ class ExecutionEvent(Base):
     __table_args__ = (
         Index("ix_execution_events_execution_id", "execution_id"),
         Index("ix_execution_events_event_type", "event_type"),
+    )
+
+
+class RunEvent(Base):
+    """Structured, replayable event for an execution (ActiveGraph-inspired).
+
+    Unlike ``execution_events`` (a human-readable timeline whose ``description``
+    is prose), a RunEvent carries a machine ``payload_json`` sufficient to replay
+    the run's step state. The genesis step list and fork lineage live in event
+    payloads (``run_started``/``run_forked``), so this is the ONLY new table and
+    the ``executions`` schema is untouched - safe under create_all with no
+    migration. Ordering authority is the global autoincrement ``id``.
+    """
+
+    __tablename__ = "run_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    execution_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("executions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    execution: Mapped["Execution"] = relationship("Execution", back_populates="run_events")
+
+    __table_args__ = (
+        Index("ix_run_events_execution_id", "execution_id"),
     )
 
 
