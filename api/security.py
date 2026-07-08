@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 import requests.adapters
 from fastapi import HTTPException, status
 
+# starlette renamed HTTP_422_UNPROCESSABLE_ENTITY to ..._CONTENT; support both
+# so the pinned fastapi/starlette pair and newer installs agree on 422.
+HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
 logger = logging.getLogger(__name__)
 
 _ALLOWED_NETWORKS: list[ipaddress._BaseNetwork] = []
@@ -100,19 +104,19 @@ def resolve_and_pin_integration_url(url: str) -> PinnedURL:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=HTTP_422,
             detail="Only HTTP(S) integration URLs are allowed",
         )
 
     if not parsed.hostname:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=HTTP_422,
             detail="Integration URL must include a hostname",
         )
 
     if _is_blocked_ip(parsed.hostname):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=HTTP_422,
             detail="Integration URL points to a disallowed private or local address",
         )
 
@@ -128,13 +132,13 @@ def resolve_and_pin_integration_url(url: str) -> PinnedURL:
         resolved = socket.getaddrinfo(parsed.hostname, parsed.port or None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=HTTP_422,
             detail="Integration URL hostname could not be resolved",
         ) from exc
 
     if not resolved:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=HTTP_422,
             detail="Integration URL hostname could not be resolved",
         )
 
@@ -142,7 +146,7 @@ def resolve_and_pin_integration_url(url: str) -> PinnedURL:
         resolved_ip = sockaddr[0]
         if _is_blocked_ip(resolved_ip):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=HTTP_422,
                 detail="Integration URL resolves to a disallowed private or local address",
             )
 
