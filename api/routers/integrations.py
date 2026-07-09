@@ -1,32 +1,40 @@
-"""
-Integrations Router — CRUD + connection testing for external tool integrations.
-"""
+"""Integrations Router - CRUD, connection tests, and connector actions."""
 
+import json
 import re
 from datetime import datetime, timezone
-from typing import List
+from pathlib import Path
+from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from api.auth import get_api_key
 from api.crypto import decrypt_secret, encrypt_secret
 from api.database import get_db
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
+from api.integrations.connectors import get_connector
 from api.integrations.config import Integration
-from api.integrations.mock_data import MOCK_HANDLERS
+from api.integrations.mock_data import MOCK_HANDLERS, get_mock_action_result
 from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
 )
+from api.orm_models import Execution, ExecutionEvent, RunEvent
+from api.routers.executions import _validate_node_id_for_path
 from api.schemas import IntegrationOut, IntegrationUpdate
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
+from api.services import replay
+from api.services.executions import find_step, load_steps, now_iso, serialize_steps
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
 
-VALID_TOOLS = {"thehive", "cortex", "wazuh", "misp"}
+VALID_TOOLS = {"thehive", "http_webhook", "cortex", "wazuh", "misp"}
 URL_PATTERN = re.compile(r"^https?://\S+$")
+EVIDENCE_ROOT = Path(__file__).resolve().parent.parent / "data" / "evidence"
 
 
 def _to_out(i: Integration) -> IntegrationOut:
@@ -204,66 +212,195 @@ def _raise_for_thehive_error(exc: TheHiveError) -> None:
     )
 
 
-@router.post("/integrations/thehive/actions/create_case")
-def thehive_create_case(payload: CreateCaseRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.create_case(
-            title=payload.title,
-            description=payload.description,
-            severity=payload.severity,
-            tlp=payload.tlp,
-            pap=payload.pap,
-            tags=payload.tags,
+def _schema_for_action(tool: str, action: str):
+    connector = get_connector(tool)
+    if connector is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")
+    schema = connector.actions().get(action)
+    if schema is None:
+        raise HTTPException(status_code=404, detail=f"Unknown action: {action}")
+    return connector, schema
+
+
+def _extract_run_context(body: dict[str, Any]) -> tuple[int | None, str | None, dict[str, Any]]:
+    payload = dict(body)
+    run_id = payload.pop("run_id", None)
+    node_id = payload.pop("node_id", None)
+    return run_id, node_id, payload
+
+
+def _validate_run_step(
+    db: Session,
+    run_id: int | None,
+    node_id: str | None,
+) -> tuple[Execution, list[dict[str, Any]], dict[str, Any]] | None:
+    if run_id is None or node_id is None:
+        return None
+    execution = db.query(Execution).filter(Execution.id == run_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    steps = load_steps(execution)
+    step = find_step(steps, node_id)
+    if step is None:
+        raise HTTPException(status_code=404, detail="Step not found")
+    _validate_node_id_for_path(node_id)
+    return execution, steps, step
+
+
+def _attach_action_result(
+    db: Session,
+    execution: Execution,
+    steps: list[dict[str, Any]],
+    step: dict[str, Any],
+    *,
+    tool: str,
+    action: str,
+    result: dict[str, Any],
+) -> None:
+    uploaded_at = now_iso()
+    filename = f"{tool}-{action}-result.json"
+    body = json.dumps(result, default=str, indent=2, sort_keys=True).encode("utf-8")
+    node_id = str(step.get("node_id") or "")
+
+    target_dir = EVIDENCE_ROOT / str(execution.id) / node_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / filename
+    if target_path.exists():
+        stem = target_path.stem
+        suffix = target_path.suffix
+        for index in range(1, 10000):
+            candidate = target_dir / f"{stem}-{index}{suffix}"
+            if not candidate.exists():
+                target_path = candidate
+                filename = target_path.name
+                break
+    target_path.write_bytes(body)
+
+    entry = {
+        "filename": filename,
+        "size": len(body),
+        "uploaded_at": uploaded_at,
+        "content_type": "application/json",
+        "connector": tool,
+        "action": action,
+        "result": result,
+    }
+    step["evidence"] = list(step.get("evidence") or []) + [entry]
+    execution.steps_json = serialize_steps(steps)
+    db.add(
+        ExecutionEvent(
+            execution_id=execution.id,
+            event_type="evidence_attached",
+            description=f"Connector action '{tool}.{action}' result attached to '{step.get('node_label')}'",
         )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    case_id = result.get("_id")
-    number = result.get("number")
-    case_url = (
-        f"{integration.base_url.rstrip('/')}/cases/{number}/details" if number else None
     )
-    return {"case_id": case_id, "number": number, "url": case_url, "raw": result}
+    db.add(
+        RunEvent(
+            execution_id=execution.id,
+            event_type=replay.STEP_EVIDENCE_ATTACHED,
+            payload_json=json.dumps({"node_id": step.get("node_id"), "evidence": entry}, default=str),
+        )
+    )
+
+
+def _validate_action_payload(schema, payload: dict[str, Any]):
+    try:
+        return schema.model_validate(payload)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+
+def _dispatch_connector_action(
+    tool: str,
+    action: str,
+    body: dict[str, Any],
+    db: Session,
+    *,
+    allow_mock_mode: bool = True,
+) -> dict[str, Any]:
+    connector, schema = _schema_for_action(tool, action)
+    integration = _get_integration(db, tool)
+    run_id, node_id, connector_payload = _extract_run_context(body)
+    run_context = _validate_run_step(db, run_id, node_id)
+    validated_payload = _validate_action_payload(schema, connector_payload)
+
+    if not integration.enabled:
+        raise HTTPException(status_code=400, detail="Integration disabled")
+    if integration.mock_mode:
+        if not allow_mock_mode:
+            raise HTTPException(status_code=400, detail="Cannot run live action in mock mode")
+        result = get_mock_action_result(tool, action)
+    else:
+        try:
+            result = connector.execute(action, validated_payload, integration)
+        except TheHiveError as exc:
+            _raise_for_thehive_error(exc)
+
+    if run_context is not None:
+        execution, steps, step = run_context
+        _attach_action_result(
+            db,
+            execution,
+            steps,
+            step,
+            tool=tool,
+            action=action,
+            result=result,
+        )
+        db.commit()
+
+    return result
+
+
+@router.get("/integrations/{tool}/actions")
+def list_connector_actions(tool: str):
+    connector = get_connector(tool)
+    if connector is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")
+    return [
+        {"name": name, "schema": schema.model_json_schema()}
+        for name, schema in sorted(connector.actions().items())
+    ]
+
+
+@router.post("/integrations/thehive/actions/create_case")
+def thehive_create_case(payload: CreateCaseRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "create_case",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
 
 
 @router.post("/integrations/thehive/actions/create_alert")
-def thehive_create_alert(payload: CreateAlertRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.create_alert(
-            type=payload.type,
-            source=payload.source,
-            source_ref=payload.source_ref,
-            title=payload.title,
-            description=payload.description,
-            severity=payload.severity,
-            tlp=payload.tlp,
-            pap=payload.pap,
-            observables=payload.observables,
-            tags=payload.tags,
-        )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    return {"alert_id": result.get("_id"), "raw": result}
+def thehive_create_alert(payload: CreateAlertRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "create_alert",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
 
 
 @router.post("/integrations/thehive/actions/add_observable")
-def thehive_add_observable(payload: AddObservableRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.add_observable(
-            case_id=payload.case_id,
-            data_type=payload.data_type,
-            data=payload.data,
-            message=payload.message,
-            tlp=payload.tlp,
-            ioc=payload.ioc,
-            sighted=payload.sighted,
-            tags=payload.tags,
-        )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    return {"observable_id": result.get("_id"), "raw": result}
+def thehive_add_observable(payload: AddObservableRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "add_observable",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
+
+
+@router.post("/integrations/{tool}/actions/{action}")
+def run_connector_action(
+    tool: str,
+    action: str,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    return _dispatch_connector_action(tool, action, payload, db)

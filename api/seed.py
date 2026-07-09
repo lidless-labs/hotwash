@@ -130,14 +130,18 @@ def _collect_tags(content: str) -> Set[str]:
 
 
 def seed_integrations(db: Session) -> int:
-    """Seed default integrations if none exist."""
+    """Seed any missing default integrations."""
     from api.integrations.config import Integration, DEFAULT_INTEGRATIONS
 
-    existing = db.query(Integration).count()
-    if existing > 0:
-        return 0
+    existing_tools = {
+        row[0]
+        for row in db.query(Integration.tool_name).all()
+    }
 
+    inserted = 0
     for item in DEFAULT_INTEGRATIONS:
+        if item["tool_name"] in existing_tools:
+            continue
         db.add(Integration(
             tool_name=item["tool_name"],
             display_name=item["display_name"],
@@ -146,8 +150,9 @@ def seed_integrations(db: Session) -> int:
             verify_ssl=True,
             last_status="unchecked",
         ))
+        inserted += 1
     db.commit()
-    return len(DEFAULT_INTEGRATIONS)
+    return inserted
 
 
 def seed(db: Session) -> int:
