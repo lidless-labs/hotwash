@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from api import security
 from api.integrations.clients.thehive import TheHiveClient
+from api.integrations.clients.wazuh import WazuhClient
 from api.security import PinnedURL, apply_host_pinning, resolve_and_pin_integration_url
 
 
@@ -124,3 +125,48 @@ def test_thehive_client_requests_go_to_pinned_ip():
     args, kwargs = mock_request.call_args
     assert args == ("GET", "http://93.184.216.34:9000/base/api/v1/status")
     assert kwargs["allow_redirects"] is False
+
+
+def test_wazuh_client_requests_go_to_pinned_ip():
+    pinned = PinnedURL(
+        url="https://93.184.216.34:55000/base",
+        hostname="wazuh.example.com",
+        host_header="wazuh.example.com:55000",
+    )
+    client = WazuhClient(
+        base_url="https://wazuh.example.com:55000/base",
+        username="alice",
+        password="secret",
+        pinned=pinned,
+    )
+
+    assert client.base_url == "https://wazuh.example.com:55000/base"
+    assert client._session.headers["Host"] == "wazuh.example.com:55000"
+    with patch.object(client._session, "request") as mock_request:
+        mock_request.side_effect = [
+            type(
+                "Response",
+                (),
+                {
+                    "status_code": 200,
+                    "ok": True,
+                    "text": "jwt-token",
+                    "json": lambda self: {},
+                },
+            )(),
+            type(
+                "Response",
+                (),
+                {
+                    "status_code": 200,
+                    "ok": True,
+                    "text": '{"title": "Wazuh API"}',
+                    "json": lambda self: {"title": "Wazuh API"},
+                },
+            )(),
+        ]
+        client.api_info()
+
+    assert mock_request.call_args_list[0].args[1] == "https://93.184.216.34:55000/base/security/user/authenticate"
+    assert mock_request.call_args_list[1].args[1] == "https://93.184.216.34:55000/base/"
+    assert mock_request.call_args_list[1].kwargs["allow_redirects"] is False

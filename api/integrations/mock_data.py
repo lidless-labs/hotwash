@@ -99,6 +99,38 @@ def get_mock_http_webhook_action(action_name: str) -> dict:
     }
 
 
+def get_mock_wazuh_action(action_name: str) -> dict:
+    raw = {
+        "data": {
+            "affected_items": [
+                {
+                    "id": "001",
+                    "name": "mock-agent-001",
+                    "status": "active",
+                    "ip": "198.51.100.10",
+                }
+            ],
+            "total_affected_items": 1,
+        },
+        "mock": True,
+        "action": action_name,
+    }
+    if action_name == "get_agents":
+        return {"agents": raw["data"]["affected_items"], "total": 1, "raw": raw, "mock": True}
+    if action_name == "get_agent":
+        return {"agent": raw["data"]["affected_items"][0], "raw": raw, "mock": True}
+    if action_name == "run_active_response":
+        return {
+            "affected_agents": raw["data"]["affected_items"],
+            "total": 1,
+            "raw": raw,
+            "mock": True,
+            "connector": "wazuh",
+            "action": action_name,
+        }
+    return {"mock": True, "connector": "wazuh", "action": action_name, "raw": raw}
+
+
 MOCK_HANDLERS = {
     "thehive": get_mock_thehive_status,
     "cortex": get_mock_cortex_status,
@@ -110,6 +142,7 @@ MOCK_HANDLERS = {
 MOCK_ACTION_HANDLERS = {
     "thehive": get_mock_thehive_action,
     "http_webhook": get_mock_http_webhook_action,
+    "wazuh": get_mock_wazuh_action,
 }
 
 

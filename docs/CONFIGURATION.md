@@ -96,6 +96,39 @@ pytest api/tests/test_thehive_live.py -m live -v -s
 
 See `docs/THEHIVE-INTEGRATION.md` for details.
 
+### Wazuh Manager Connector
+
+The Wazuh integration row stores:
+
+| Field | Description |
+|-------|-------------|
+| `base_url` | Wazuh manager API URL, for example `https://wazuh.example:55000`. |
+| `username` | Wazuh API username used for Basic auth during JWT authentication. |
+| `password` | Wazuh API password, encrypted at rest. |
+| `verify_ssl` | Whether to verify the Wazuh manager TLS certificate. |
+
+The connector exposes these generic action endpoints:
+
+```bash
+GET  /api/integrations/wazuh/actions
+POST /api/integrations/wazuh/actions/get_agents
+POST /api/integrations/wazuh/actions/get_agent
+POST /api/integrations/wazuh/actions/run_active_response
+```
+
+`get_agents` accepts optional `status`, `search`, `limit`, and `select`.
+`get_agent` requires a digit-only `agent_id`. `run_active_response` requires
+`command` and a non-empty digit-only `agent_ids` list, with optional
+`arguments` and `alert`.
+
+### `HOTWASH_LIVE_WAZUH_URL` / `HOTWASH_LIVE_WAZUH_USERNAME` / `HOTWASH_LIVE_WAZUH_PASSWORD`
+
+Optional. Required only to run the opt-in Wazuh live smoke test:
+
+```bash
+pytest api/tests/test_wazuh_live.py -m live -v -s
+```
+
 ## Theme Variants
 
 Access Hotwash variants directly:

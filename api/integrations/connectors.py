@@ -6,10 +6,11 @@ from typing import Any, Protocol, Type
 
 import requests
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.crypto import decrypt_secret
 from api.integrations.clients.thehive import TheHiveClient
+from api.integrations.clients.wazuh import WazuhClient
 from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
@@ -116,6 +117,31 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class WazuhGetAgentsRequest(_Strict):
+    status: str | None = Field(default=None, max_length=64)
+    search: str | None = Field(default=None, max_length=256)
+    limit: int | None = Field(default=None, ge=1)
+    select: str | None = Field(default=None, max_length=512)
+
+
+class WazuhGetAgentRequest(_Strict):
+    agent_id: str = Field(pattern=r"^\d+$", max_length=32)
+
+
+class WazuhRunActiveResponseRequest(_Strict):
+    command: str = Field(min_length=1, max_length=256)
+    agent_ids: list[str] = Field(min_length=1)
+    arguments: list[str] = Field(default_factory=list)
+    alert: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("agent_ids")
+    @classmethod
+    def _validate_agent_ids(cls, value: list[str]) -> list[str]:
+        if not all(item.isdigit() for item in value):
+            raise ValueError("agent_ids must contain only digit strings")
+        return value
+
+
 class HttpWebhookPostJsonRequest(_Strict):
     path: str | None = Field(default=None, max_length=2048)
     body: Any = Field(default_factory=dict)
@@ -184,6 +210,75 @@ class HttpWebhookConnector:
         }
 
 
+class WazuhConnector:
+    tool_name = "wazuh"
+
+    def actions(self) -> dict[str, Type[BaseModel]]:
+        return {
+            "get_agents": WazuhGetAgentsRequest,
+            "get_agent": WazuhGetAgentRequest,
+            "run_active_response": WazuhRunActiveResponseRequest,
+        }
+
+    def _client(self, integration_row: Any) -> WazuhClient:
+        if not integration_row.base_url:
+            raise HTTPException(status_code=400, detail="No base_url configured")
+        if not integration_row.username:
+            raise HTTPException(status_code=400, detail="No username configured")
+        password_plain = decrypt_secret(integration_row.password)
+        if not password_plain:
+            raise HTTPException(status_code=400, detail="No password configured")
+        pinned = resolve_and_pin_integration_url(integration_row.base_url)
+        return WazuhClient(
+            base_url=integration_row.base_url,
+            username=integration_row.username,
+            password=password_plain,
+            verify_ssl=integration_row.verify_ssl,
+            pinned=pinned,
+        )
+
+    def execute(self, action_name: str, validated_payload: BaseModel, integration_row: Any) -> dict[str, Any]:
+        client = self._client(integration_row)
+        if action_name == "get_agents":
+            payload = _as(WazuhGetAgentsRequest, validated_payload)
+            result = client.list_agents(
+                status=payload.status,
+                search=payload.search,
+                limit=payload.limit,
+                select=payload.select,
+            )
+            return _wazuh_collection_result("agents", result)
+
+        if action_name == "get_agent":
+            payload = _as(WazuhGetAgentRequest, validated_payload)
+            result = client.get_agent(payload.agent_id)
+            items = _wazuh_affected_items(result)
+            return {"agent": items[0] if items else None, "raw": result}
+
+        if action_name == "run_active_response":
+            payload = _as(WazuhRunActiveResponseRequest, validated_payload)
+            result = client.run_active_response(
+                command=payload.command,
+                agent_ids=payload.agent_ids,
+                arguments=payload.arguments,
+                alert=payload.alert,
+            )
+            return _wazuh_collection_result("affected_agents", result)
+
+        raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}")
+
+    def test_connection(self, integration_row: Any) -> dict[str, Any]:
+        info = self._client(integration_row).api_info()
+        # Wazuh 4.x wraps the payload in a "data" envelope.
+        meta = info.get("data") if isinstance(info.get("data"), dict) else info
+        return {
+            "status": "connected",
+            "title": meta.get("title"),
+            "api_version": meta.get("api_version"),
+            "raw": info,
+        }
+
+
 def _as(schema: Type[BaseModel], payload: BaseModel) -> Any:
     if isinstance(payload, schema):
         return payload
@@ -206,9 +301,34 @@ def _response_body(response: requests.Response) -> Any:
         return response.text[:4096]
 
 
+def _wazuh_affected_items(result: dict[str, Any]) -> list[Any]:
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        return []
+    items = data.get("affected_items")
+    return items if isinstance(items, list) else []
+
+
+def _wazuh_total(result: dict[str, Any]) -> int:
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        return 0
+    total = data.get("total_affected_items")
+    return total if isinstance(total, int) else len(_wazuh_affected_items(result))
+
+
+def _wazuh_collection_result(key: str, result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: _wazuh_affected_items(result),
+        "total": _wazuh_total(result),
+        "raw": result,
+    }
+
+
 _REGISTRY: dict[str, Connector] = {
     "thehive": TheHiveConnector(),
     "http_webhook": HttpWebhookConnector(),
+    "wazuh": WazuhConnector(),
 }
 
 

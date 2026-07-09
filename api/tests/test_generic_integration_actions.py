@@ -25,6 +25,20 @@ def _enable_webhook(temp_db, *, mock_mode: bool = False):
         session.commit()
 
 
+def _enable_wazuh(temp_db, *, mock_mode: bool = False):
+    from api.integrations.config import Integration
+
+    with temp_db() as session:
+        integration = session.query(Integration).filter_by(tool_name="wazuh").first()
+        integration.base_url = "https://wazuh.example:55000"
+        integration.username = "alice"
+        integration.password = encrypt_secret("secret")
+        integration.enabled = True
+        integration.mock_mode = mock_mode
+        integration.verify_ssl = True
+        session.commit()
+
+
 def _create_execution(temp_db, *, node_id: str = "exec_1") -> int:
     steps = [
         {
@@ -80,6 +94,14 @@ def test_lists_actions_for_registered_tool(client, api_key):
     assert "body" in body[0]["schema"]["properties"]
 
 
+def test_lists_wazuh_actions(client, api_key):
+    resp = client.get("/api/integrations/wazuh/actions", headers={"X-API-Key": api_key})
+
+    assert resp.status_code == 200
+    names = [item["name"] for item in resp.json()]
+    assert names == ["get_agent", "get_agents", "run_active_response"]
+
+
 def test_seed_integrations_adds_missing_default_without_duplicates(temp_db):
     from api.integrations.config import Integration
     from api.seed import seed_integrations
@@ -115,6 +137,76 @@ def test_generic_route_dispatches_thehive_with_existing_response_shape(client, c
         "number": 42,
         "url": "http://thehive.test:9000/cases/42/details",
         "raw": {"_id": "~123", "number": 42},
+    }
+
+
+def test_generic_route_dispatches_wazuh_action(client, temp_db, api_key):
+    _enable_wazuh(temp_db)
+
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.get_agent.return_value = {
+            "data": {"affected_items": [{"id": "001", "name": "web01"}], "total_affected_items": 1}
+        }
+        resp = client.post(
+            "/api/integrations/wazuh/actions/get_agent",
+            headers={"X-API-Key": api_key},
+            json={"agent_id": "001"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "agent": {"id": "001", "name": "web01"},
+        "raw": {"data": {"affected_items": [{"id": "001", "name": "web01"}], "total_affected_items": 1}},
+    }
+    MockClient.return_value.get_agent.assert_called_once_with("001")
+
+
+def test_wazuh_upstream_error_maps_to_502(client, temp_db, api_key):
+    from api.integrations.clients.wazuh import WazuhError
+
+    _enable_wazuh(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.get_agent.side_effect = WazuhError(
+            "Wazuh returned 503",
+            status_code=503,
+            details={"title": "Service unavailable"},
+        )
+        resp = client.post(
+            "/api/integrations/wazuh/actions/get_agent",
+            headers={"X-API-Key": api_key},
+            json={"agent_id": "001"},
+        )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == {
+        "message": "Wazuh returned 503",
+        "upstream_status": 503,
+        "details": {"title": "Service unavailable"},
+    }
+
+
+def test_wazuh_test_endpoint_uses_connector_api_info(client, temp_db, api_key):
+    _enable_wazuh(temp_db)
+
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.api_info.return_value = {"title": "Wazuh API", "api_version": "4.7.2"}
+        resp = client.post("/api/integrations/wazuh/test", headers={"X-API-Key": api_key})
+
+    assert resp.status_code == 200
+    assert resp.json()["result"] == {
+        "status": "connected",
+        "title": "Wazuh API",
+        "api_version": "4.7.2",
+        "raw": {"title": "Wazuh API", "api_version": "4.7.2"},
     }
 
 
@@ -155,6 +247,23 @@ def test_mock_mode_short_circuits_without_http_request(client, temp_db, api_key)
     assert resp.json()["status_code"] == 200
     assert resp.json()["mock"] is True
     session_cls.assert_not_called()
+
+
+def test_wazuh_mock_mode_short_circuits_without_client(client, temp_db, api_key):
+    _enable_wazuh(temp_db, mock_mode=True)
+
+    with patch("api.integrations.connectors.WazuhClient") as MockClient:
+        resp = client.post(
+            "/api/integrations/wazuh/actions/run_active_response",
+            headers={"X-API-Key": api_key},
+            json={"command": "restart-wazuh0", "agent_ids": ["001"]},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["mock"] is True
+    assert resp.json()["connector"] == "wazuh"
+    assert resp.json()["action"] == "run_active_response"
+    MockClient.assert_not_called()
 
 
 def test_action_result_attaches_to_run_evidence_before_return(client, temp_db, api_key, monkeypatch, tmp_path):

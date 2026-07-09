@@ -24,6 +24,9 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   action schemas and dispatch through generic integration endpoints, with
   TheHive behind the contract, a new `http_webhook.post_json` connector, and
   optional action-result evidence attached to run steps.
+- Wazuh connector: authenticated manager API client, agent query actions,
+  active-response trigger action, mock payloads, and an opt-in live smoke
+  test.
 - Wazuh ingest hardening: route-aware forwarder template that serves
   multiple mappings from one integration script.
 - GitHub Actions CI running the full `scripts/verify` gate.

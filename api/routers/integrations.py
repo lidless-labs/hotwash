@@ -15,6 +15,7 @@ from api.auth import get_api_key
 from api.crypto import decrypt_secret, encrypt_secret
 from api.database import get_db
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
+from api.integrations.clients.wazuh import WazuhError
 from api.integrations.connectors import get_connector
 from api.integrations.config import Integration
 from api.integrations.mock_data import MOCK_HANDLERS, get_mock_action_result
@@ -119,10 +120,9 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=400, detail="No base_url configured")
 
-    pinned = resolve_and_pin_integration_url(integration.base_url)
-    api_key_plain = decrypt_secret(integration.api_key)
-
     if tool == "thehive":
+        pinned = resolve_and_pin_integration_url(integration.base_url)
+        api_key_plain = decrypt_secret(integration.api_key)
         client = TheHiveClient(
             base_url=integration.base_url,
             api_key=api_key_plain,
@@ -135,14 +135,21 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
             integration.last_checked = now
             integration.last_status = "error" if exc.status_code else "disconnected"
             db.commit()
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "message": str(exc),
-                    "upstream_status": exc.status_code,
-                    "details": exc.details,
-                },
-            ) from exc
+            _raise_for_upstream_error(exc)
+        integration.last_checked = now
+        integration.last_status = "connected"
+        db.commit()
+        return {"tool": tool, "mock_mode": False, "result": result}
+
+    if tool == "wazuh":
+        connector = get_connector(tool)
+        try:
+            result = connector.test_connection(integration)
+        except WazuhError as exc:
+            integration.last_checked = now
+            integration.last_status = "error" if exc.status_code else "disconnected"
+            db.commit()
+            _raise_for_upstream_error(exc)
         integration.last_checked = now
         integration.last_status = "connected"
         db.commit()
@@ -153,6 +160,8 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
     # redirects, so DNS rebinding cannot steer the probe to a private address.
     try:
         import requests
+        pinned = resolve_and_pin_integration_url(integration.base_url)
+        api_key_plain = decrypt_secret(integration.api_key)
         session = requests.Session()
         apply_host_pinning(session, pinned)
         if api_key_plain:
@@ -201,7 +210,7 @@ def _build_thehive_client(integration: Integration) -> TheHiveClient:
     )
 
 
-def _raise_for_thehive_error(exc: TheHiveError) -> None:
+def _raise_for_upstream_error(exc: TheHiveError | WazuhError) -> None:
     raise HTTPException(
         status_code=502,
         detail={
@@ -210,6 +219,10 @@ def _raise_for_thehive_error(exc: TheHiveError) -> None:
             "details": exc.details,
         },
     )
+
+
+def _raise_for_thehive_error(exc: TheHiveError) -> None:
+    _raise_for_upstream_error(exc)
 
 
 def _schema_for_action(tool: str, action: str):
@@ -333,8 +346,8 @@ def _dispatch_connector_action(
     else:
         try:
             result = connector.execute(action, validated_payload, integration)
-        except TheHiveError as exc:
-            _raise_for_thehive_error(exc)
+        except (TheHiveError, WazuhError) as exc:
+            _raise_for_upstream_error(exc)
 
     if run_context is not None:
         execution, steps, step = run_context
