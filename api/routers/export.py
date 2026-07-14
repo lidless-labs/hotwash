@@ -81,27 +81,43 @@ def _to_markdown_from_graph(graph: Dict[str, Any]) -> str:
         phase_label = phase.get("label") or phase_id
         lines.append(f"## Phase: {phase_label}")
 
-        for edge in outgoing.get(phase_id, []):
-            child_id = str(_edge_target(edge))
-            child = node_by_id.get(child_id)
-            if not child:
-                continue
+        phase_edges = outgoing.get(phase_id, [])
+        if phase_edges:
+            for edge in phase_edges:
+                child_id = str(_edge_target(edge))
+                child = node_by_id.get(child_id)
+                if not child:
+                    continue
 
-            node_type = str(child.get("type", "")).lower()
-            label = child.get("label") or child_id
+                node_type = str(child.get("type", "")).lower()
+                label = child.get("label") or child_id
 
-            if node_type == "decision":
-                lines.append(f"- Decision: {label}")
-                for branch in outgoing.get(child_id, []):
-                    branch_target = node_by_id.get(str(_edge_target(branch)))
-                    if not branch_target:
-                        continue
-                    branch_label = (_edge_label(branch) or "branch").upper()
-                    if branch_label not in {"YES", "NO"}:
-                        branch_label = f"BRANCH ({branch_label})"
-                    lines.append(f"  - {branch_label}: {branch_target.get('label') or branch_target.get('id')}")
-            else:
-                lines.append(f"- Step: {label}")
+                if node_type == "decision":
+                    lines.append(f"- Decision: {label}")
+                    for branch in outgoing.get(child_id, []):
+                        branch_target = node_by_id.get(str(_edge_target(branch)))
+                        if not branch_target:
+                            continue
+                        branch_label = (_edge_label(branch) or "branch").upper()
+                        if branch_label not in {"YES", "NO"}:
+                            branch_label = f"BRANCH ({branch_label})"
+                        lines.append(f"  - {branch_label}: {branch_target.get('label') or branch_target.get('id')}")
+                else:
+                    lines.append(f"- Step: {label}")
+        else:
+            # Mermaid subgraph phases group their children via metadata.subgraph
+            # rather than outgoing edges. Without this fallback the round-trip
+            # export drops every step inside a subgraph.
+            for child in nodes:
+                meta = child.get("metadata") or {}
+                if str(meta.get("subgraph") or "") != phase_id:
+                    continue
+                node_type = str(child.get("type", "")).lower()
+                label = child.get("label") or child.get("id")
+                if node_type == "decision":
+                    lines.append(f"- Decision: {label}")
+                else:
+                    lines.append(f"- Step: {label}")
 
         lines.append("")
 

@@ -207,6 +207,28 @@ class MermaidParser:
                 edge_type=self._edge_type(match),
             )
 
+    def _upgrade_node_shape(
+        self,
+        node_id: str,
+        label: Optional[str],
+        node_type: Optional[str],
+    ) -> None:
+        """Adopt a richer label/type when a node first seen bare (in an edge) is
+        later given a shape. Only a shaped mention (both label and type present,
+        per ``_extract_node_info``) upgrades; a bare re-mention is a no-op. This
+        stops the first mention from permanently winning - e.g. ``A --> B`` then
+        ``A[Start]`` keeping label "A", or ``A[x]`` then ``A{Decide}`` staying a
+        step instead of becoming a decision (which also loses decision_options).
+        """
+        if label is None or node_type is None:
+            return
+        internal_id = self.node_id_map[node_id]
+        for node in self.nodes:
+            if node.id == internal_id:
+                node.label = label
+                node.type = node_type
+                break
+
     def _ensure_node(
         self,
         node_id: str,
@@ -214,6 +236,7 @@ class MermaidParser:
         node_type: Optional[str],
     ) -> None:
         if node_id in self.node_id_map:
+            self._upgrade_node_shape(node_id, label, node_type)
             return
         internal_id = self._create_node_id()
         self.node_id_map[node_id] = internal_id
@@ -248,7 +271,9 @@ class MermaidParser:
         """
         node_id, label, node_type = self._extract_node_info(line)
 
-        if node_id and node_id not in self.node_id_map:
+        if not node_id:
+            return
+        if node_id not in self.node_id_map:
             internal_id = self._create_node_id()
             self.node_id_map[node_id] = internal_id
             node = PlaybookNode(
@@ -258,6 +283,8 @@ class MermaidParser:
                 metadata={"mermaid_id": node_id, "subgraph": self.current_subgraph}
             )
             self.nodes.append(node)
+        else:
+            self._upgrade_node_shape(node_id, label, node_type)
 
     def _extract_node_info(self, text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """

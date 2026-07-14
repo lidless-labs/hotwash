@@ -443,6 +443,26 @@ class TestMermaidParser:
             assert hasattr(edge, 'label')
 
 
+    def test_bare_node_then_shaped_definition_upgrades_label(self):
+        """H3: a node first seen bare in an edge, then given a shape, adopts the label."""
+        content = """flowchart TD
+    A --> B
+    A[Start Label]"""
+        result = self.parser.parse(content)
+        a = next(n for n in result.nodes if n.metadata.get("mermaid_id") == "A")
+        assert a.label == "Start Label"
+
+    def test_redeclared_node_upgrades_step_to_decision(self):
+        """H3: redeclaring a node with a decision shape upgrades its type (and label)."""
+        content = """flowchart TD
+    A[First]
+    A{Decision Now}"""
+        result = self.parser.parse(content)
+        a = next(n for n in result.nodes if n.metadata.get("mermaid_id") == "A")
+        assert a.type == "decision"
+        assert a.label == "Decision Now"
+
+
 if __name__ == "__main__":
     # Allow running tests directly
     pytest.main([__file__, "-v"])
