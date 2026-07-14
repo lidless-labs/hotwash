@@ -2,11 +2,66 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any, Protocol, Type
 
 import requests
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+
+def _allowed_active_response_commands() -> set[str] | None:
+    """Configured allow-list of permitted Wazuh active-response commands.
+
+    Returns the set from ``HOTWASH_WAZUH_AR_COMMANDS`` (comma-separated), or
+    ``None`` when unset (unrestricted, but the dispatch logs a warning). Setting
+    it restricts which response commands an API-key holder can fire at agents.
+    """
+    raw = os.environ.get("HOTWASH_WAZUH_AR_COMMANDS", "").strip()
+    if not raw:
+        return None
+    return {token.strip() for token in raw.split(",") if token.strip()}
+
+
+def _enforce_active_response_allowlist(command: str) -> None:
+    allowed = _allowed_active_response_commands()
+    if allowed is None:
+        logger.warning(
+            "Wazuh active-response command %r dispatched with no "
+            "HOTWASH_WAZUH_AR_COMMANDS allow-list configured; any command "
+            "defined in the manager's ossec.conf can be triggered. Set "
+            "HOTWASH_WAZUH_AR_COMMANDS to restrict.",
+            command,
+        )
+        return
+    if command not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Active-response command '{command}' is not permitted; "
+                "add it to HOTWASH_WAZUH_AR_COMMANDS to allow it"
+            ),
+        )
+
+
+def _decrypt_or_fail(encrypted: str | None, label: str) -> str | None:
+    """Decrypt a stored secret, distinguishing "none stored" from "cannot decrypt".
+
+    ``decrypt_secret`` returns None for both an absent secret and a corrupt or
+    wrong-key ciphertext, so callers that treat None as "no auth" would send a
+    request unauthenticated when a stored key simply failed to decrypt. Return
+    None only when nothing was stored; raise when a stored secret can't be
+    decrypted.
+    """
+    if not encrypted:
+        return None
+    plain = decrypt_secret(encrypted)
+    if plain is None:
+        raise HTTPException(status_code=500, detail=f"Stored {label} could not be decrypted")
+    return plain
 
 from api.crypto import decrypt_secret
 from api.integrations.clients.thehive import TheHiveClient
@@ -165,7 +220,7 @@ class HttpWebhookConnector:
 
         session = requests.Session()
         session.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
-        api_key_plain = decrypt_secret(integration_row.api_key)
+        api_key_plain = _decrypt_or_fail(integration_row.api_key, "webhook credential")
         if api_key_plain:
             session.headers["Authorization"] = f"Bearer {api_key_plain}"
         apply_host_pinning(session, pinned)
@@ -191,7 +246,7 @@ class HttpWebhookConnector:
             raise HTTPException(status_code=400, detail="No base_url configured")
         pinned = resolve_and_pin_integration_url(integration_row.base_url)
         session = requests.Session()
-        api_key_plain = decrypt_secret(integration_row.api_key)
+        api_key_plain = _decrypt_or_fail(integration_row.api_key, "webhook credential")
         if api_key_plain:
             session.headers["Authorization"] = f"Bearer {api_key_plain}"
         apply_host_pinning(session, pinned)
@@ -257,6 +312,7 @@ class WazuhConnector:
 
         if action_name == "run_active_response":
             payload = _as(WazuhRunActiveResponseRequest, validated_payload)
+            _enforce_active_response_allowlist(payload.command)
             result = client.run_active_response(
                 command=payload.command,
                 agent_ids=payload.agent_ids,
@@ -291,6 +347,10 @@ def _join_url_path(base_url: str, path: str | None) -> str:
     stripped = path.strip()
     if stripped.startswith(("http://", "https://", "//")):
         raise HTTPException(status_code=422, detail="Webhook path must be relative")
+    # Reject parent-directory traversal (literal or percent-encoded) so a
+    # relative path cannot walk to a different endpoint on the pinned host.
+    if ".." in stripped.split("/") or "%2e" in stripped.lower():
+        raise HTTPException(status_code=422, detail="Webhook path must not contain '..' segments")
     return f"{base_url.rstrip('/')}/{stripped.lstrip('/')}"
 
 
@@ -317,12 +377,37 @@ def _wazuh_total(result: dict[str, Any]) -> int:
     return total if isinstance(total, int) else len(_wazuh_affected_items(result))
 
 
+def _wazuh_failed_items(result: dict[str, Any]) -> list[Any]:
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        return []
+    items = data.get("failed_items")
+    return items if isinstance(items, list) else []
+
+
+def _wazuh_total_failed(result: dict[str, Any]) -> int:
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        return 0
+    total = data.get("total_failed_items")
+    return total if isinstance(total, int) else len(_wazuh_failed_items(result))
+
+
 def _wazuh_collection_result(key: str, result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    # Wazuh returns HTTP 200 for active-response even when it failed on some
+    # agents, reporting them under failed_items. Surface that so a failed
+    # response is not stored as a successful action (silent partial failure).
+    out: dict[str, Any] = {
         key: _wazuh_affected_items(result),
         "total": _wazuh_total(result),
         "raw": result,
     }
+    failed = _wazuh_failed_items(result)
+    total_failed = _wazuh_total_failed(result)
+    if failed or total_failed:
+        out["failed"] = failed
+        out["total_failed"] = total_failed
+    return out
 
 
 _REGISTRY: dict[str, Connector] = {

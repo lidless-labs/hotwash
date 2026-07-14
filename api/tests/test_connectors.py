@@ -303,3 +303,122 @@ def test_wazuh_rejects_ssrf_before_request(temp_db):
 
     assert exc.value.status_code == 422
     MockClient.assert_not_called()
+
+
+def test_wazuh_active_response_rejects_command_not_in_allowlist(temp_db, monkeypatch):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
+
+    monkeypatch.setenv("HOTWASH_WAZUH_AR_COMMANDS", "firewall-drop,host-deny")
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        with pytest.raises(HTTPException) as exc:
+            get_connector("wazuh").execute(
+                "run_active_response",
+                WazuhRunActiveResponseRequest(command="rm-everything", agent_ids=["001"]),
+                integration,
+            )
+
+    assert exc.value.status_code == 422
+    MockClient.return_value.run_active_response.assert_not_called()
+
+
+def test_wazuh_active_response_allows_command_in_allowlist(temp_db, monkeypatch):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
+
+    monkeypatch.setenv("HOTWASH_WAZUH_AR_COMMANDS", "firewall-drop")
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.run_active_response.return_value = {
+            "data": {"affected_items": [{"id": "001"}], "total_affected_items": 1}
+        }
+        result = get_connector("wazuh").execute(
+            "run_active_response",
+            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"]),
+            integration,
+        )
+
+    assert result["total"] == 1
+    MockClient.return_value.run_active_response.assert_called_once()
+
+
+def test_wazuh_active_response_surfaces_failed_items(temp_db, monkeypatch):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
+
+    monkeypatch.delenv("HOTWASH_WAZUH_AR_COMMANDS", raising=False)
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.run_active_response.return_value = {
+            "data": {
+                "affected_items": [],
+                "total_affected_items": 0,
+                "failed_items": [{"id": "001", "error": {"message": "agent not active"}}],
+                "total_failed_items": 1,
+            }
+        }
+        result = get_connector("wazuh").execute(
+            "run_active_response",
+            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"]),
+            integration,
+        )
+
+    assert result["affected_agents"] == []
+    assert result["total"] == 0
+    assert result["total_failed"] == 1
+    assert result["failed"] == [{"id": "001", "error": {"message": "agent not active"}}]
+
+
+def test_http_webhook_rejects_path_traversal(temp_db):
+    from api.integrations.connectors import HttpWebhookPostJsonRequest, get_connector
+
+    integration = _webhook_integration(temp_db)
+    with patch("api.integrations.connectors.requests.Session") as session_cls:
+        with pytest.raises(HTTPException) as exc:
+            get_connector("http_webhook").execute(
+                "post_json",
+                HttpWebhookPostJsonRequest(path="../../admin", body={}),
+                integration,
+            )
+
+    assert exc.value.status_code == 422
+    session_cls.assert_not_called()
+
+
+def test_http_webhook_fails_when_stored_key_cannot_be_decrypted(temp_db):
+    from api.integrations.config import Integration
+    from api.integrations.connectors import HttpWebhookPostJsonRequest, get_connector
+
+    with temp_db() as session:
+        integration = session.query(Integration).filter_by(tool_name="http_webhook").first()
+        integration.base_url = "https://webhook.example/base"
+        integration.enabled = True
+        integration.mock_mode = False
+        integration.verify_ssl = False
+        # a stored value that is not a valid Fernet token (decryption fails)
+        corrupt_ciphertext = "not-a-valid-fernet-token"
+        integration.api_key = corrupt_ciphertext
+        session.commit()
+        session.refresh(integration)
+        session.expunge(integration)
+
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34/base", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.requests.Session") as session_cls:
+        with pytest.raises(HTTPException) as exc:
+            get_connector("http_webhook").execute(
+                "post_json",
+                HttpWebhookPostJsonRequest(body={"event": "x"}),
+                integration,
+            )
+
+    assert exc.value.status_code == 500
+    session_cls.return_value.post.assert_not_called()
