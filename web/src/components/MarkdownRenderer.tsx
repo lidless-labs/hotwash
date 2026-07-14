@@ -7,6 +7,7 @@
 
 import React from 'react';
 import './MarkdownRenderer.css';
+import { safeHref } from './urlSafety';
 
 interface MarkdownRendererProps {
   content: string;
@@ -174,11 +175,18 @@ function parsePipeRow(line: string): string[] {
     .map((c) => c.trim());
 }
 
+// Above this per-line length, skip inline markdown parsing and render the raw
+// text (still React-escaped). The inline matcher re-scans the remaining string
+// on every iteration, which is quadratic on a single very long crafted line;
+// this cap keeps an adversarial playbook from freezing the tab.
+const INLINE_MAX_LEN = 10000;
+
 /**
  * Render inline markdown (bold, italic, code, links) to React nodes.
  */
 function renderInline(text: string): React.ReactNode {
   if (!text) return null;
+  if (text.length > INLINE_MAX_LEN) return text;
 
   // Pattern order matters: code first (to avoid matching inside code), then links, bold, italic
   const parts: React.ReactNode[] = [];
@@ -200,7 +208,7 @@ function renderInline(text: string): React.ReactNode {
     if (match) {
       if (match[1]) parts.push(renderInlineSimple(match[1], inlineKey++));
       parts.push(
-        <a key={`a-${inlineKey++}`} href={match[3]} target="_blank" rel="noopener noreferrer">
+        <a key={`a-${inlineKey++}`} href={safeHref(match[3])} target="_blank" rel="noopener noreferrer">
           {match[2]}
         </a>
       );
