@@ -2,6 +2,9 @@
   <img src="docs/assets/hotwash-banner.jpg" alt="hotwash banner" width="900">
 </p>
 
+<p align="center">
+  <a href="https://lidless.dev"><img src="docs/assets/marks/hotwash-circle.png" width="48" alt="Lidless Labs"></a>
+</p>
 <h1 align="center">⚒️ Hotwash</h1>
 
 <p align="center">
@@ -320,3 +323,11 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
 ## License
 
 MIT - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center"><a href="https://lidless.dev">Part of <strong>Lidless Labs</strong></a> &middot; the eye does not close</p>
+
+<p align="center"><sub><strong>Security / SOC:</strong> <a href="https://github.com/lidless-labs/soc-stack">soc-stack</a> &middot; <a href="https://github.com/lidless-labs/wazuh-mcp">wazuh-mcp</a> &middot; <a href="https://github.com/lidless-labs/misp-mcp">misp-mcp</a> &middot; <a href="https://github.com/lidless-labs/suricata-mcp">suricata-mcp</a> &middot; <a href="https://github.com/lidless-labs/thehive-mcp">thehive-mcp</a> &middot; <a href="https://github.com/lidless-labs/cortex-mcp">cortex-mcp</a> &middot; <a href="https://github.com/lidless-labs/mitre-mcp">mitre-mcp</a> &middot; <a href="https://github.com/lidless-labs/zeek-mcp">zeek-mcp</a></sub></p>
+
+<p align="center"><sub><a href="https://lidless.dev">All tools</a> &middot; <a href="https://github.com/lidless-labs">Lidless Labs on GitHub</a></sub></p>
