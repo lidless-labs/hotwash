@@ -78,9 +78,14 @@ def apply_event(steps: List[Dict[str, Any]], event: Dict[str, Any]) -> List[Dict
         # started_at is set once, on the first transition into in_progress.
         if new_status == "in_progress" and not step.get("started_at"):
             step["started_at"] = at
-        # completed_at is stamped on the transition into a terminal step status.
-        if new_status in COMPLETED_STEP_STATUSES and previous != new_status:
-            step["completed_at"] = at
+        # completed_at is stamped on the transition into a terminal step status,
+        # and cleared when a completed/skipped step is reopened (mirrors the
+        # router so the replay oracle stays byte-for-byte consistent).
+        if new_status in COMPLETED_STEP_STATUSES:
+            if previous != new_status:
+                step["completed_at"] = at
+        elif step.get("completed_at"):
+            step["completed_at"] = None
     elif etype == STEP_ASSIGNEE_CHANGED:
         step["assignee"] = payload.get("assignee") or None
     elif etype == STEP_NOTE_ADDED:

@@ -117,3 +117,24 @@ def test_diff_of_identical_runs_is_clean(client, temp_db, api_key):
     diff = client.get(f"/api/executions/{ex}/diff/{fork_id}", headers=headers).json()
     assert diff["identical"] is True
     assert diff["differences"] == []
+
+
+def test_reopening_completed_step_clears_completed_at_and_replay_agrees(client, temp_db, api_key):
+    headers = {"X-API-Key": api_key}
+    pb = _seed_playbook(temp_db)
+    ex = _create_execution(client, headers, pb)
+
+    _advance(client, headers, ex, "n1", status="in_progress")
+    done = _advance(client, headers, ex, "n1", status="completed")
+    assert next(s for s in done["steps"] if s["node_id"] == "n1")["completed_at"] is not None
+
+    # H2: reopening a completed step must clear the stale completion time.
+    reopened = _advance(client, headers, ex, "n1", status="in_progress")
+    n1 = next(s for s in reopened["steps"] if s["node_id"] == "n1")
+    assert n1["status"] == "in_progress"
+    assert n1["completed_at"] is None
+
+    # The reducer mirrors the reset, so the replay oracle still matches persisted.
+    replay = client.get(f"/api/executions/{ex}/replay", headers=headers).json()
+    assert replay["matches_persisted"] is True
+    assert {s["node_id"]: s for s in replay["steps"]}["n1"]["completed_at"] is None

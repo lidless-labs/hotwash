@@ -169,3 +169,36 @@ def test_execution_report_json_and_markdown(client, temp_db, api_key):
     assert markdown.status_code == 200
     assert "# After-Action Report" in markdown.text
     assert "Suspicious host" in markdown.text
+
+
+def test_step_status_change_blocked_on_terminal_execution(client, temp_db, api_key):
+    # H1: a completed/abandoned run's completion state is frozen.
+    execution_id = _create_execution(temp_db)  # status="completed"
+    resp = client.patch(
+        f"/api/executions/{execution_id}/steps/node_1",
+        headers={"X-API-Key": api_key},
+        json={"status": "in_progress"},
+    )
+    assert resp.status_code == 409
+
+
+def test_step_decision_change_blocked_on_terminal_execution(client, temp_db, api_key):
+    execution_id = _create_execution(temp_db)
+    resp = client.patch(
+        f"/api/executions/{execution_id}/steps/node_1",
+        headers={"X-API-Key": api_key},
+        json={"decision_taken": "escalate"},
+    )
+    assert resp.status_code == 409
+
+
+def test_step_note_still_allowed_on_terminal_execution(client, temp_db, api_key):
+    # Annotations (notes/assignee/evidence) stay allowed for after-action review.
+    execution_id = _create_execution(temp_db)
+    resp = client.patch(
+        f"/api/executions/{execution_id}/steps/node_1",
+        headers={"X-API-Key": api_key},
+        json={"notes": "after-action note"},
+    )
+    assert resp.status_code == 200
+    assert "after-action note" in resp.json()["steps"][0]["notes"]
