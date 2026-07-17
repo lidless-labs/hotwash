@@ -1,14 +1,17 @@
 """Integrations Router - CRUD, connection tests, and connector actions."""
 
+import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from api.auth import get_api_key
@@ -25,17 +28,21 @@ from api.integrations.schemas import (
     CreateCaseRequest,
 )
 from api.orm_models import Execution, ExecutionEvent, RunEvent
-from api.routers.executions import _validate_node_id_for_path
+from api.routers.executions import _unique_evidence_path, _validate_node_id_for_path
 from api.schemas import IntegrationOut, IntegrationUpdate
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
 from api.services import replay
 from api.services.executions import find_step, load_steps, now_iso, serialize_steps
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
+logger = logging.getLogger(__name__)
 
 VALID_TOOLS = {"thehive", "http_webhook", "cortex", "wazuh", "misp"}
 URL_PATTERN = re.compile(r"^https?://\S+$")
 EVIDENCE_ROOT = Path(__file__).resolve().parent.parent / "data" / "evidence"
+MAX_INLINE_CONNECTOR_RESULT_BYTES = 4096
+STEPS_JSON_CAS_MAX_RETRIES = 8
+EVIDENCE_FILE_CREATE_MAX_RETRIES = 8
 
 
 def _to_out(i: Integration) -> IntegrationOut:
@@ -260,60 +267,116 @@ def _validate_run_step(
     return execution, steps, step
 
 
+def _bound_connector_result(result: dict[str, Any], *, file_body: bytes) -> dict[str, Any]:
+    """Keep small connector results inline; summarize large ones deterministically."""
+    if len(file_body) <= MAX_INLINE_CONNECTOR_RESULT_BYTES:
+        return result
+    return {
+        "truncated": True,
+        "size_bytes": len(file_body),
+        "sha256": hashlib.sha256(file_body).hexdigest(),
+    }
+
+
+def _write_unique_evidence_file(
+    target_dir: Path,
+    filename: str,
+    body: bytes,
+) -> tuple[Path, str]:
+    """Create an evidence file exclusively, retrying only a concurrent name race."""
+    for _ in range(EVIDENCE_FILE_CREATE_MAX_RETRIES):
+        target_path, stored_name = _unique_evidence_path(target_dir, filename)
+        try:
+            with target_path.open("xb") as handle:
+                handle.write(body)
+        except FileExistsError:
+            continue
+        return target_path, stored_name
+    raise HTTPException(status_code=409, detail="Concurrent evidence filename allocation")
+
+
 def _attach_action_result(
     db: Session,
-    execution: Execution,
-    steps: list[dict[str, Any]],
-    step: dict[str, Any],
+    execution_id: int,
+    node_id: str,
     *,
     tool: str,
     action: str,
     result: dict[str, Any],
 ) -> None:
     uploaded_at = now_iso()
-    filename = f"{tool}-{action}-result.json"
     body = json.dumps(result, default=str, indent=2, sort_keys=True).encode("utf-8")
-    node_id = str(step.get("node_id") or "")
-
-    target_dir = EVIDENCE_ROOT / str(execution.id) / node_id
+    inline_result = _bound_connector_result(result, file_body=body)
+    filename = f"{tool}-{action}-result.json"
+    _validate_node_id_for_path(node_id)
+    target_dir = EVIDENCE_ROOT / str(execution_id) / node_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / filename
-    if target_path.exists():
-        stem = target_path.stem
-        suffix = target_path.suffix
-        for index in range(1, 10000):
-            candidate = target_dir / f"{stem}-{index}{suffix}"
-            if not candidate.exists():
-                target_path = candidate
-                filename = target_path.name
-                break
-    target_path.write_bytes(body)
+    target_path: Path | None = None
+    entry: dict[str, Any] | None = None
 
-    entry = {
-        "filename": filename,
-        "size": len(body),
-        "uploaded_at": uploaded_at,
-        "content_type": "application/json",
-        "connector": tool,
-        "action": action,
-        "result": result,
-    }
-    step["evidence"] = list(step.get("evidence") or []) + [entry]
-    execution.steps_json = serialize_steps(steps)
-    db.add(
-        ExecutionEvent(
-            execution_id=execution.id,
-            event_type="evidence_attached",
-            description=f"Connector action '{tool}.{action}' result attached to '{step.get('node_label')}'",
+    for _ in range(STEPS_JSON_CAS_MAX_RETRIES):
+        db.expire_all()
+        execution = db.query(Execution).filter(Execution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        expected_steps_json = execution.steps_json
+        steps = load_steps(execution)
+        step = find_step(steps, node_id)
+        if step is None:
+            raise HTTPException(status_code=404, detail="Step not found")
+
+        if entry is None:
+            target_path, stored_name = _write_unique_evidence_file(target_dir, filename, body)
+            entry = {
+                "filename": stored_name,
+                "size": len(body),
+                "uploaded_at": uploaded_at,
+                "content_type": "application/json",
+                "connector": tool,
+                "action": action,
+                "result": inline_result,
+            }
+
+        step["evidence"] = list(step.get("evidence") or []) + [entry]
+        new_steps_json = serialize_steps(steps)
+        updated = db.execute(
+            update(Execution)
+            .where(
+                Execution.id == execution_id,
+                Execution.steps_json == expected_steps_json,
+            )
+            .values(steps_json=new_steps_json)
         )
-    )
-    db.add(
-        RunEvent(
-            execution_id=execution.id,
-            event_type=replay.STEP_EVIDENCE_ATTACHED,
-            payload_json=json.dumps({"node_id": step.get("node_id"), "evidence": entry}, default=str),
-        )
-    )
+        if updated.rowcount == 1:
+            db.add(
+                ExecutionEvent(
+                    execution_id=execution_id,
+                    event_type="evidence_attached",
+                    description=(
+                        f"Connector action '{tool}.{action}' result attached to "
+                        f"'{step.get('node_label')}'"
+                    ),
+                )
+            )
+            db.add(
+                RunEvent(
+                    execution_id=execution_id,
+                    event_type=replay.STEP_EVIDENCE_ATTACHED,
+                    payload_json=json.dumps(
+                        {"node_id": node_id, "evidence": entry},
+                        default=str,
+                    ),
+                )
+            )
+            return
+        db.rollback()
+
+    if target_path is not None:
+        try:
+            target_path.unlink()
+        except OSError:
+            pass
+    raise HTTPException(status_code=409, detail="Concurrent execution update")
 
 
 def _validate_action_payload(schema, payload: dict[str, Any]):
@@ -330,6 +393,7 @@ def _dispatch_connector_action(
     db: Session,
     *,
     allow_mock_mode: bool = True,
+    response: Response | None = None,
 ) -> dict[str, Any]:
     connector, schema = _schema_for_action(tool, action)
     integration = _get_integration(db, tool)
@@ -350,17 +414,28 @@ def _dispatch_connector_action(
             _raise_for_upstream_error(exc)
 
     if run_context is not None:
-        execution, steps, step = run_context
-        _attach_action_result(
-            db,
-            execution,
-            steps,
-            step,
-            tool=tool,
-            action=action,
-            result=result,
-        )
-        db.commit()
+        execution, _steps, _step = run_context
+        try:
+            _attach_action_result(
+                db,
+                execution.id,
+                str(node_id),
+                tool=tool,
+                action=action,
+                result=result,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Connector action %s.%s completed but evidence attachment failed",
+                tool,
+                action,
+            )
+            if response is None:
+                raise
+            response.headers["X-Hotwash-Action-Status"] = "completed"
+            response.headers["X-Hotwash-Evidence-Status"] = "failed"
 
     return result
 
@@ -413,7 +488,8 @@ def thehive_add_observable(payload: AddObservableRequest = Body(...), db: Sessio
 def run_connector_action(
     tool: str,
     action: str,
+    response: Response,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
 ):
-    return _dispatch_connector_action(tool, action, payload, db)
+    return _dispatch_connector_action(tool, action, payload, db, response=response)
