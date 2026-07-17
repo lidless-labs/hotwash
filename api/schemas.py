@@ -139,6 +139,10 @@ class ExecutionEvidence(BaseModel):
     filename: str
     size: int
     uploaded_at: datetime
+    content_type: Optional[str] = None
+    connector: Optional[str] = None
+    action: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
 
 
 class ExecutionStep(BaseModel):
