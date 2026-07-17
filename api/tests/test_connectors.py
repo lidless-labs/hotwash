@@ -407,19 +407,31 @@ def test_wazuh_active_response_surfaces_failed_items(temp_db, monkeypatch):
     assert result["failed"] == [{"id": "001", "error": {"message": "agent not active"}}]
 
 
-def test_http_webhook_rejects_path_traversal(temp_db):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../admin",
+        "..%2f..%2fadmin",
+        "..\\admin",
+        "%252e%252e/admin",
+    ],
+)
+def test_http_webhook_rejects_path_traversal(temp_db, path):
     from api.integrations.connectors import HttpWebhookPostJsonRequest, get_connector
 
     integration = _webhook_integration(temp_db)
-    with patch("api.integrations.connectors.requests.Session") as session_cls:
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url"
+    ) as resolve, patch("api.integrations.connectors.requests.Session") as session_cls:
         with pytest.raises(HTTPException) as exc:
             get_connector("http_webhook").execute(
                 "post_json",
-                HttpWebhookPostJsonRequest(path="../../admin", body={}),
+                HttpWebhookPostJsonRequest(path=path, body={}),
                 integration,
             )
 
     assert exc.value.status_code == 422
+    resolve.assert_not_called()
     session_cls.assert_not_called()
 
 

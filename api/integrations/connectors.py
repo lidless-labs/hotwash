@@ -362,10 +362,16 @@ def _join_url_path(base_url: str, path: str | None) -> str:
     stripped = path.strip()
     if stripped.startswith(("http://", "https://", "//")):
         raise HTTPException(status_code=422, detail="Webhook path must be relative")
-    # Reject parent-directory traversal (literal or percent-encoded) so a
-    # relative path cannot walk to a different endpoint on the pinned host.
-    if ".." in stripped.split("/") or "%2e" in stripped.lower():
-        raise HTTPException(status_code=422, detail="Webhook path must not contain '..' segments")
+    # Reject parent-directory traversal and ambiguous encoded separators so a
+    # downstream decoder cannot turn a safe-looking relative path into `..`.
+    lowered = stripped.lower()
+    encoded_traversal_tokens = ("%2e", "%2f", "%5c", "%25")
+    if (
+        ".." in stripped.split("/")
+        or "\\" in stripped
+        or any(token in lowered for token in encoded_traversal_tokens)
+    ):
+        raise HTTPException(status_code=422, detail="Webhook path must not contain traversal segments")
     return f"{base_url.rstrip('/')}/{stripped.lstrip('/')}"
 
 

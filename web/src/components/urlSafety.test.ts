@@ -24,9 +24,11 @@ describe('safeHref', () => {
     expect(safeHref('file:///etc/passwd')).toBe('#');
   });
 
-  it('neutralizes scheme-obfuscation via embedded tab/newline/CR', () => {
+  it('neutralizes scheme-obfuscation via C0 control characters', () => {
     expect(safeHref('java\tscript:alert(1)')).toBe('#');
     expect(safeHref('java\nscript:alert(1)')).toBe('#');
+    expect(safeHref('\u0000javascript:alert(1)')).toBe('#');
+    expect(safeHref('\u0001javascript:alert(1)')).toBe('#');
     expect(safeHref('  javascript:alert(1)  ')).toBe('#');
   });
 
