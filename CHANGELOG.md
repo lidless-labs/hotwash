@@ -43,6 +43,20 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   back in line with the actual tree and ports.
 
 ### Fixed
+- Markdown link hrefs are sanitized before render: playbook content can no
+  longer smuggle a `javascript:`/`vbscript:`/`data:` link (stored XSS), and
+  inline rendering is length-capped against a quadratic-regex tab freeze.
+- Wazuh active-response can be restricted with a `HOTWASH_WAZUH_AR_COMMANDS`
+  allow-list, and a partial failure (`failed_items`) is surfaced instead of
+  being recorded as a successful action.
+- HTTP webhook connector rejects `..`/`%2e` path traversal and fails on a
+  stored credential that cannot be decrypted instead of sending unauthenticated.
+- A completed/abandoned run's step status and decisions are frozen (409);
+  reopening a completed step clears its stale `completed_at` in both the router
+  and the replay reducer.
+- Mermaid parsing: a shaped re-mention upgrades a node's label/type (a decision
+  no longer stays a step), subgraph steps survive round-trip export, and a
+  duplicate node id no longer creates an unreachable step that blocks 100%.
 - SSRF guard closes the DNS-rebinding TOCTOU: integration fetches now
   resolve once, validate every resolved address, and connect to the
   pinned IP with the original hostname kept for Host/SNI; redirects on

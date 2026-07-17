@@ -71,6 +71,7 @@ HOTWASH_CORS_ORIGINS=http://localhost:5177
 | `HOTWASH_KEY_PATH` | Path to the Fernet key file, auto-created with mode 0600. | `~/.encryption_key` |
 | `HOTWASH_WAZUH_SEED_SECRET` | HMAC secret for the seeded Wazuh ingest mapping. | (random per seed) |
 | `HOTWASH_PRIVATE_HOST_ALLOWLIST` | CIDRs exempt from the outbound SSRF block (see below). | (empty) |
+| `HOTWASH_WAZUH_AR_COMMANDS` | Comma-separated allow-list of Wazuh active-response commands. When set, only these commands can be dispatched; when unset, any command the manager defines is allowed (with a warning). | (empty) |
 
 ### Database Setup
 
@@ -120,6 +121,13 @@ POST /api/integrations/wazuh/actions/run_active_response
 `get_agent` requires a digit-only `agent_id`. `run_active_response` requires
 `command` and a non-empty digit-only `agent_ids` list, with optional
 `arguments` and `alert`.
+
+`run_active_response` triggers response actions on endpoints, so restrict which
+commands it can dispatch with `HOTWASH_WAZUH_AR_COMMANDS` (comma-separated). When
+set, a command outside the list is rejected with `422`; when unset, any command
+the manager defines in `ossec.conf` can be triggered and the dispatch logs a
+warning. A partial failure (some agents in `failed_items`) is surfaced in the
+action result as `failed`/`total_failed` rather than reported as success.
 
 ### `HOTWASH_LIVE_WAZUH_URL` / `HOTWASH_LIVE_WAZUH_USERNAME` / `HOTWASH_LIVE_WAZUH_PASSWORD`
 

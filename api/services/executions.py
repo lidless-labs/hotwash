@@ -46,12 +46,24 @@ def build_steps_from_playbook(playbook: Playbook) -> List[Dict[str, Any]]:
 
     steps: List[Dict[str, Any]] = []
     current_phase: Optional[str] = None
+    seen_node_ids: set[str] = set()
 
     for node in nodes:
         node_type = (node.get("type") or "step").lower()
         node_id = str(node.get("id") or "")
         if not node_id:
             continue
+        # find_step() resolves a node_id to the first matching step, so a second
+        # step with the same id would be unreachable (never startable, but still
+        # counted in steps_total so a run could never reach 100%). Keep the first.
+        if node_id in seen_node_ids:
+            logger.warning(
+                "Playbook %s has duplicate node id %r; keeping the first step and skipping the rest",
+                playbook.id,
+                node_id,
+            )
+            continue
+        seen_node_ids.add(node_id)
         label = node.get("label") or node_id
 
         if node_type == "phase":

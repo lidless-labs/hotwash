@@ -467,6 +467,20 @@ async def update_step(
     if step is None:
         raise HTTPException(status_code=404, detail="Step not found")
 
+    # A terminal run's completion state is frozen: block step status/decision
+    # changes (they corrupt the timeline and after-action report), but still
+    # allow notes/assignee/evidence for after-action annotation.
+    if execution.status in TERMINAL_EXECUTION_STATUSES and (
+        payload.status is not None or payload.decision_taken is not None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Execution is {execution.status}; reactivate it (PATCH status=active) "
+                "before changing step status or decisions"
+            ),
+        )
+
     now = datetime.now(timezone.utc).isoformat()
     events_to_emit: List[tuple[str, str]] = []
     # Structured, replayable counterparts to the prose events above. Carrying the
@@ -482,10 +496,15 @@ async def update_step(
         if payload.status == "in_progress" and not step.get("started_at"):
             step["started_at"] = now
             events_to_emit.append(("step_started", f"Step '{step.get('node_label')}' started"))
-        if payload.status in {"completed", "skipped"} and previous != payload.status:
-            step["completed_at"] = now
-            label = "completed" if payload.status == "completed" else "skipped"
-            events_to_emit.append(("step_completed", f"Step '{step.get('node_label')}' {label}"))
+        if payload.status in {"completed", "skipped"}:
+            if previous != payload.status:
+                step["completed_at"] = now
+                label = "completed" if payload.status == "completed" else "skipped"
+                events_to_emit.append(("step_completed", f"Step '{step.get('node_label')}' {label}"))
+        elif step.get("completed_at"):
+            # Reopening a completed/skipped step: clear the stale completion time
+            # so step durations and the report are not computed from it.
+            step["completed_at"] = None
         run_events_to_emit.append(
             (replay.STEP_STATUS_CHANGED, {"node_id": node_id, "status": payload.status, "at": now})
         )
