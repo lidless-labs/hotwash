@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import requests
@@ -43,6 +44,8 @@ class WazuhClient:
         self.verify_ssl = verify_ssl
         self.timeout = timeout
         self._jwt: str | None = None
+        basic_value = base64.b64encode(f"{username}:{password}".encode("latin-1")).decode("ascii")
+        self._secret_values = {password, basic_value}
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -65,7 +68,7 @@ class WazuhClient:
             return [self._sanitize_value(item) for item in value]
         if isinstance(value, str):
             sanitized = value
-            for secret in (self._password, self._jwt):
+            for secret in self._secret_values:
                 if secret:
                     sanitized = sanitized.replace(secret, "[redacted]")
             return sanitized
@@ -120,6 +123,7 @@ class WazuhClient:
                 details={},
             )
         self._jwt = token
+        self._secret_values.add(token)
         return token
 
     def _authenticated_request(

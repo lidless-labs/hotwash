@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,7 +87,7 @@ def test_request_raises_sanitized_error_after_retry_fails():
             _mock_response(200, text="first-token"),
             _mock_response(401, json_body={"detail": "bad jwt first-token secret"}),
             _mock_response(200, text="second-token"),
-            _mock_response(401, json_body={"detail": "bad jwt second-token secret"}),
+            _mock_response(401, json_body={"detail": "bad jwt first-token second-token secret"}),
         ]
         with pytest.raises(WazuhError) as exc:
             client.api_info()
@@ -95,7 +96,7 @@ def test_request_raises_sanitized_error_after_retry_fails():
     assert "secret" not in str(exc.value)
     assert "first-token" not in str(exc.value.details)
     assert "second-token" not in str(exc.value.details)
-    assert exc.value.details == {"detail": "bad jwt [redacted] [redacted]"}
+    assert exc.value.details == {"detail": "bad jwt [redacted] [redacted] [redacted]"}
 
 
 def test_authentication_failure_raises_wazuh_error_without_password():
@@ -116,6 +117,22 @@ def test_authentication_failure_raises_wazuh_error_without_password():
     assert "secret" not in str(exc.value)
     assert "secret" not in str(exc.value.details)
     assert exc.value.details["[redacted]-key"] == "[redacted] rejected"
+
+
+def test_authentication_failure_redacts_basic_auth_value():
+    client = WazuhClient(base_url="https://wazuh.example:55000", username="alice", password="secret")
+    encoded_credentials = base64.b64encode(b"alice:secret").decode("ascii")
+
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(
+            401,
+            json_body={"detail": f"reflected Authorization: Basic {encoded_credentials}"},
+        )
+        with pytest.raises(WazuhError) as exc:
+            client.api_info()
+
+    assert encoded_credentials not in str(exc.value.details)
+    assert exc.value.details == {"detail": "reflected Authorization: Basic [redacted]"}
 
 
 def test_connection_error_is_mapped_to_wazuh_error():

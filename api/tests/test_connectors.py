@@ -227,6 +227,20 @@ def test_wazuh_get_agents_action_builds_client_and_returns_summary(temp_db):
     )
 
 
+def test_wazuh_test_connection_rejects_non_object_api_info(temp_db):
+    from api.integrations.clients.wazuh import WazuhError
+    from api.integrations.connectors import get_connector
+
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.api_info.return_value = []
+        with pytest.raises(WazuhError, match="object"):
+            get_connector("wazuh").test_connection(integration)
+
+
 def test_wazuh_get_agent_rejects_non_digit_agent_id():
     from api.integrations.connectors import WazuhGetAgentRequest
 
@@ -239,6 +253,23 @@ def test_wazuh_active_response_requires_digit_agent_ids():
 
     with pytest.raises(ValueError):
         WazuhRunActiveResponseRequest(command="restart-wazuh0", agent_ids=["001", "bad"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"agent_ids": ["٠٠١"]},
+        {"agent_ids": [f"{index:03d}" for index in range(101)]},
+        {"agent_ids": ["001"], "arguments": ["x"] * 33},
+        {"agent_ids": ["001"], "arguments": ["x" * 1025]},
+        {"agent_ids": ["001"], "alert": {"blob": "x" * 65536}},
+    ],
+)
+def test_wazuh_active_response_bounds_destructive_payload(payload):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest
+
+    with pytest.raises(ValueError):
+        WazuhRunActiveResponseRequest(command="restart-wazuh0", **payload)
 
 
 def test_wazuh_active_response_action_returns_summary(temp_db):

@@ -254,6 +254,8 @@ def _validate_run_step(
     run_id: int | None,
     node_id: str | None,
 ) -> tuple[Execution, list[dict[str, Any]], dict[str, Any]] | None:
+    if (run_id is None) != (node_id is None):
+        raise HTTPException(status_code=422, detail="run_id and node_id must be provided together")
     if run_id is None or node_id is None:
         return None
     execution = db.query(Execution).filter(Execution.id == run_id).first()

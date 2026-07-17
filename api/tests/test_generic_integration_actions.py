@@ -312,8 +312,54 @@ def test_action_result_attaches_to_run_evidence_before_return(client, temp_db, a
         assert evidence["connector"] == "http_webhook"
         assert evidence["action"] == "post_json"
         assert evidence["result"] == {"status_code": 200, "body": {"ok": True}}
+        evidence["unexpected_internal_field"] = "must not be exposed"
+        execution.steps_json = serialize_steps(steps)
+        session.commit()
         assert session.query(ExecutionEvent).filter_by(event_type="evidence_attached").count() == 1
         assert session.query(RunEvent).filter_by(event_type=replay.STEP_EVIDENCE_ATTACHED).count() == 1
+
+    detail = client.get(f"/api/executions/{execution_id}", headers={"X-API-Key": api_key})
+    assert detail.status_code == 200
+    api_evidence = detail.json()["steps"][0]["evidence"][-1]
+    assert api_evidence["connector"] == "http_webhook"
+    assert api_evidence["action"] == "post_json"
+    assert api_evidence["result"] == {"status_code": 200, "body": {"ok": True}}
+    assert "unexpected_internal_field" not in api_evidence
+
+
+@pytest.mark.parametrize(
+    "run_context",
+    [
+        {"run_id": "execution"},
+        {"node_id": "exec_1"},
+    ],
+)
+def test_partial_run_context_is_rejected_before_action(
+    client, temp_db, api_key, run_context
+):
+    from api.integrations.connectors import HttpWebhookConnector
+
+    _enable_webhook(temp_db)
+    execution_id = _create_execution(temp_db)
+    payload = {"body": {"event": "x"}}
+    payload.update(run_context)
+    if payload.get("run_id") == "execution":
+        payload["run_id"] = execution_id
+
+    with patch.object(
+        HttpWebhookConnector,
+        "execute",
+        return_value={"status_code": 200, "body": {"ok": True}},
+    ) as execute:
+        resp = client.post(
+            "/api/integrations/http_webhook/actions/post_json",
+            headers={"X-API-Key": api_key},
+            json=payload,
+        )
+
+    assert resp.status_code == 422
+    assert "run_id and node_id" in resp.json()["detail"]
+    execute.assert_not_called()
 
 
 def test_action_result_retries_cas_conflict_and_preserves_concurrent_update(monkeypatch, tmp_path):

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Type
+import json
+from typing import Annotated, Any, Protocol, Type
 
 import requests
 from fastapi import HTTPException
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.crypto import decrypt_secret
 from api.integrations.clients.thehive import TheHiveClient
-from api.integrations.clients.wazuh import WazuhClient
+from api.integrations.clients.wazuh import WazuhClient, WazuhError
 from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
@@ -128,17 +129,26 @@ class WazuhGetAgentRequest(_Strict):
     agent_id: str = Field(pattern=r"^\d+$", max_length=32)
 
 
+WazuhAgentId = Annotated[str, Field(pattern=r"^[0-9]+$", max_length=32)]
+WazuhActiveResponseArgument = Annotated[str, Field(max_length=1024)]
+MAX_WAZUH_ACTIVE_RESPONSE_ALERT_BYTES = 64 * 1024
+
+
 class WazuhRunActiveResponseRequest(_Strict):
     command: str = Field(min_length=1, max_length=256)
-    agent_ids: list[str] = Field(min_length=1)
-    arguments: list[str] = Field(default_factory=list)
+    agent_ids: list[WazuhAgentId] = Field(min_length=1, max_length=100)
+    arguments: list[WazuhActiveResponseArgument] = Field(default_factory=list, max_length=32)
     alert: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("agent_ids")
+    @field_validator("alert")
     @classmethod
-    def _validate_agent_ids(cls, value: list[str]) -> list[str]:
-        if not all(item.isdigit() for item in value):
-            raise ValueError("agent_ids must contain only digit strings")
+    def _validate_alert_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise ValueError("alert must be JSON serializable") from exc
+        if len(encoded) > MAX_WAZUH_ACTIVE_RESPONSE_ALERT_BYTES:
+            raise ValueError("alert must not exceed 65536 encoded bytes")
         return value
 
 
@@ -269,6 +279,11 @@ class WazuhConnector:
 
     def test_connection(self, integration_row: Any) -> dict[str, Any]:
         info = self._client(integration_row).api_info()
+        if not isinstance(info, dict):
+            raise WazuhError(
+                "Wazuh API info response must be a JSON object",
+                details={"response_type": type(info).__name__},
+            )
         # Wazuh 4.x wraps the payload in a "data" envelope.
         meta = info.get("data") if isinstance(info.get("data"), dict) else info
         return {
