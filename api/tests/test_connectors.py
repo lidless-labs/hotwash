@@ -27,12 +27,36 @@ def _webhook_integration(temp_db, *, mock_mode: bool = False, api_key: str = "")
         return integration
 
 
+def _wazuh_integration(
+    temp_db,
+    *,
+    base_url: str = "https://wazuh.example:55000",
+    username: str = "alice",
+    password: str = "secret",
+):
+    from api.integrations.config import Integration
+
+    with temp_db() as session:
+        integration = session.query(Integration).filter_by(tool_name="wazuh").first()
+        integration.base_url = base_url
+        integration.username = username
+        integration.password = encrypt_secret(password) if password else ""
+        integration.enabled = True
+        integration.mock_mode = False
+        integration.verify_ssl = False
+        session.commit()
+        session.refresh(integration)
+        session.expunge(integration)
+        return integration
+
+
 def test_registry_lists_registered_connectors():
     from api.integrations.connectors import get_connector, registered_tool_names
 
-    assert registered_tool_names() == ["http_webhook", "thehive"]
+    assert registered_tool_names() == ["http_webhook", "thehive", "wazuh"]
     assert get_connector("thehive").tool_name == "thehive"
     assert get_connector("http_webhook").tool_name == "http_webhook"
+    assert get_connector("wazuh").tool_name == "wazuh"
     assert get_connector("missing") is None
 
 
@@ -45,6 +69,11 @@ def test_connectors_declare_pydantic_action_schemas():
     assert set(actions) == {"post_json"}
     assert issubclass(actions["post_json"], BaseModel)
     assert "body" in actions["post_json"].model_json_schema()["properties"]
+
+    wazuh_actions = get_connector("wazuh").actions()
+    assert set(wazuh_actions) == {"get_agent", "get_agents", "run_active_response"}
+    assert issubclass(wazuh_actions["get_agents"], BaseModel)
+    assert wazuh_actions["get_agent"].model_json_schema()["additionalProperties"] is False
 
 
 def test_http_webhook_posts_json_to_pinned_url(temp_db):
@@ -155,3 +184,153 @@ def test_http_webhook_truncates_text_response_to_4kb(temp_db):
 
     assert result["status_code"] == 200
     assert result["body"] == "x" * 4096
+
+
+def test_wazuh_get_agents_action_builds_client_and_returns_summary(temp_db):
+    from api.integrations.connectors import WazuhGetAgentsRequest, get_connector
+
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ) as resolve, patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.list_agents.return_value = {
+            "data": {
+                "affected_items": [{"id": "001", "name": "web01"}],
+                "total_affected_items": 1,
+            }
+        }
+        result = get_connector("wazuh").execute(
+            "get_agents",
+            WazuhGetAgentsRequest(status="active", search="web", limit=10, select="id,name"),
+            integration,
+        )
+
+    assert result == {
+        "agents": [{"id": "001", "name": "web01"}],
+        "total": 1,
+        "raw": {"data": {"affected_items": [{"id": "001", "name": "web01"}], "total_affected_items": 1}},
+    }
+    resolve.assert_called_once_with("https://wazuh.example:55000")
+    MockClient.assert_called_once_with(
+        base_url="https://wazuh.example:55000",
+        username="alice",
+        password="secret",
+        verify_ssl=False,
+        pinned=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    )
+    MockClient.return_value.list_agents.assert_called_once_with(
+        status="active",
+        search="web",
+        limit=10,
+        select="id,name",
+    )
+
+
+def test_wazuh_test_connection_rejects_non_object_api_info(temp_db):
+    from api.integrations.clients.wazuh import WazuhError
+    from api.integrations.connectors import get_connector
+
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.api_info.return_value = []
+        with pytest.raises(WazuhError, match="object"):
+            get_connector("wazuh").test_connection(integration)
+
+
+def test_wazuh_get_agent_rejects_non_digit_agent_id():
+    from api.integrations.connectors import WazuhGetAgentRequest
+
+    with pytest.raises(ValueError):
+        WazuhGetAgentRequest(agent_id="agent-001")
+
+
+def test_wazuh_active_response_requires_digit_agent_ids():
+    from api.integrations.connectors import WazuhRunActiveResponseRequest
+
+    with pytest.raises(ValueError):
+        WazuhRunActiveResponseRequest(command="restart-wazuh0", agent_ids=["001", "bad"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"agent_ids": ["٠٠١"]},
+        {"agent_ids": [f"{index:03d}" for index in range(101)]},
+        {"agent_ids": ["001"], "arguments": ["x"] * 33},
+        {"agent_ids": ["001"], "arguments": ["x" * 1025]},
+        {"agent_ids": ["001"], "alert": {"blob": "x" * 65536}},
+    ],
+)
+def test_wazuh_active_response_bounds_destructive_payload(payload):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest
+
+    with pytest.raises(ValueError):
+        WazuhRunActiveResponseRequest(command="restart-wazuh0", **payload)
+
+
+def test_wazuh_active_response_action_returns_summary(temp_db):
+    from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
+
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        return_value=PinnedURL(url="https://93.184.216.34:55000", hostname=None, host_header=None),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        MockClient.return_value.run_active_response.return_value = {
+            "data": {"affected_items": [{"id": "001"}], "total_affected_items": 1}
+        }
+        result = get_connector("wazuh").execute(
+            "run_active_response",
+            WazuhRunActiveResponseRequest(
+                command="restart-wazuh0",
+                agent_ids=["001"],
+                arguments=["arg1"],
+                alert={"rule": {"id": "5710"}},
+            ),
+            integration,
+        )
+
+    assert result["affected_agents"] == [{"id": "001"}]
+    assert result["total"] == 1
+    assert result["raw"]["data"]["total_affected_items"] == 1
+    MockClient.return_value.run_active_response.assert_called_once_with(
+        command="restart-wazuh0",
+        agent_ids=["001"],
+        arguments=["arg1"],
+        alert={"rule": {"id": "5710"}},
+    )
+
+
+def test_wazuh_missing_credentials_raise_400(temp_db):
+    from api.integrations.connectors import WazuhGetAgentsRequest, get_connector
+
+    for field, detail_fragment in (
+        ("base_url", "base_url"),
+        ("username", "username"),
+        ("password", "password"),
+    ):
+        integration = _wazuh_integration(temp_db)
+        setattr(integration, field, "")
+        with pytest.raises(HTTPException) as exc:
+            get_connector("wazuh").execute("get_agents", WazuhGetAgentsRequest(), integration)
+        assert exc.value.status_code == 400
+        assert detail_fragment in exc.value.detail.lower()
+
+
+def test_wazuh_rejects_ssrf_before_request(temp_db):
+    from api.integrations.connectors import WazuhGetAgentsRequest, get_connector
+
+    integration = _wazuh_integration(temp_db)
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        side_effect=HTTPException(status_code=422, detail="blocked"),
+    ), patch("api.integrations.connectors.WazuhClient") as MockClient:
+        with pytest.raises(HTTPException) as exc:
+            get_connector("wazuh").execute("get_agents", WazuhGetAgentsRequest(), integration)
+
+    assert exc.value.status_code == 422
+    MockClient.assert_not_called()
