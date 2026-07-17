@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Barrier
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+from fastapi import HTTPException
 
 from api.crypto import encrypt_secret
 from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
@@ -197,6 +205,227 @@ def test_action_result_attaches_to_run_evidence_before_return(client, temp_db, a
         assert evidence["result"] == {"status_code": 200, "body": {"ok": True}}
         assert session.query(ExecutionEvent).filter_by(event_type="evidence_attached").count() == 1
         assert session.query(RunEvent).filter_by(event_type=replay.STEP_EVIDENCE_ATTACHED).count() == 1
+
+
+def test_action_result_retries_cas_conflict_and_preserves_concurrent_update(monkeypatch, tmp_path):
+    from api.routers import integrations
+
+    monkeypatch.setattr(integrations, "EVIDENCE_ROOT", tmp_path / "evidence")
+    original_steps = [
+        {
+            "node_id": "exec_1",
+            "node_label": "Notify webhook",
+            "notes": [],
+            "evidence": [],
+        }
+    ]
+    concurrent_steps = json.loads(serialize_steps(original_steps))
+    concurrent_steps[0]["notes"] = ["updated during evidence attachment"]
+    execution = SimpleNamespace(id=42, steps_json=serialize_steps(original_steps))
+
+    class FakeQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return execution
+
+    class ConflictingSession:
+        def __init__(self):
+            self.execute_calls = 0
+            self.rollbacks = 0
+            self.persisted_steps_json = None
+            self.added = []
+
+        def expire_all(self):
+            return None
+
+        def query(self, _model):
+            return FakeQuery()
+
+        def execute(self, statement):
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                execution.steps_json = serialize_steps(concurrent_steps)
+                return SimpleNamespace(rowcount=0)
+            params = statement.compile().params
+            self.persisted_steps_json = next(
+                value for key, value in params.items() if key.startswith("steps_json")
+            )
+            return SimpleNamespace(rowcount=1)
+
+        def rollback(self):
+            self.rollbacks += 1
+
+        def add(self, value):
+            self.added.append(value)
+
+    db = ConflictingSession()
+    integrations._attach_action_result(
+        db,
+        execution.id,
+        "exec_1",
+        tool="http_webhook",
+        action="post_json",
+        result={"status_code": 200, "body": {"ok": True}},
+    )
+
+    persisted_steps = json.loads(db.persisted_steps_json)
+    assert db.execute_calls == 2
+    assert db.rollbacks == 1
+    assert persisted_steps[0]["notes"] == ["updated during evidence attachment"]
+    assert len(persisted_steps[0]["evidence"]) == 1
+
+
+def test_action_result_cleans_file_after_exhausted_cas_retries(monkeypatch, tmp_path):
+    from api.routers import integrations
+
+    monkeypatch.setattr(integrations, "EVIDENCE_ROOT", tmp_path / "evidence")
+    monkeypatch.setattr(integrations, "STEPS_JSON_CAS_MAX_RETRIES", 2)
+    steps = [{"node_id": "exec_1", "node_label": "Notify webhook", "evidence": []}]
+    execution = SimpleNamespace(id=42, steps_json=serialize_steps(steps))
+
+    class AlwaysConflictingSession:
+        def expire_all(self):
+            return None
+
+        def query(self, _model):
+            return SimpleNamespace(
+                filter=lambda *_args, **_kwargs: SimpleNamespace(first=lambda: execution)
+            )
+
+        def execute(self, _statement):
+            return SimpleNamespace(rowcount=0)
+
+        def rollback(self):
+            return None
+
+    with pytest.raises(HTTPException, match="Concurrent execution update"):
+        integrations._attach_action_result(
+            AlwaysConflictingSession(),
+            execution.id,
+            "exec_1",
+            tool="http_webhook",
+            action="post_json",
+            result={"status_code": 200, "body": {"ok": True}},
+        )
+
+    target_dir = tmp_path / "evidence" / "42" / "exec_1"
+    assert list(target_dir.iterdir()) == []
+
+
+def test_action_result_bounds_inline_payload_but_keeps_full_evidence_file(
+    client, temp_db, api_key, monkeypatch, tmp_path
+):
+    from api.integrations.connectors import HttpWebhookConnector
+    from api.routers import integrations
+
+    _enable_webhook(temp_db)
+    execution_id = _create_execution(temp_db)
+    evidence_root = tmp_path / "evidence"
+    monkeypatch.setattr(integrations, "EVIDENCE_ROOT", evidence_root)
+    large_payload = {"blob": "x" * 5000}
+    connector_result = {"status_code": 200, "body": large_payload}
+
+    with patch.object(
+        HttpWebhookConnector,
+        "execute",
+        return_value=connector_result,
+    ):
+        resp = client.post(
+            "/api/integrations/http_webhook/actions/post_json",
+            headers={"X-API-Key": api_key},
+            json={"run_id": execution_id, "node_id": "exec_1", "body": {"event": "x"}},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == connector_result
+
+    file_body = json.dumps(connector_result, default=str, indent=2, sort_keys=True).encode("utf-8")
+    expected_summary = {
+        "truncated": True,
+        "size_bytes": len(file_body),
+        "sha256": hashlib.sha256(file_body).hexdigest(),
+    }
+
+    evidence_path = evidence_root / str(execution_id) / "exec_1" / "http_webhook-post_json-result.json"
+    assert json.loads(evidence_path.read_text(encoding="utf-8")) == connector_result
+
+    with temp_db() as session:
+        execution = session.query(Execution).filter_by(id=execution_id).one()
+        evidence = json.loads(execution.steps_json)[0]["evidence"][-1]
+        assert evidence["result"] == expected_summary
+        assert evidence["result"] != connector_result
+
+        run_event = session.query(RunEvent).filter_by(event_type=replay.STEP_EVIDENCE_ATTACHED).one()
+        payload = json.loads(run_event.payload_json)
+        assert payload["evidence"]["result"] == expected_summary
+
+
+def test_connector_evidence_filename_exhaustion_reports_completed_action_without_retry(
+    client, temp_db, api_key, monkeypatch, tmp_path
+):
+    from api.integrations.connectors import HttpWebhookConnector
+    from api.routers import integrations
+
+    _enable_webhook(temp_db)
+    execution_id = _create_execution(temp_db)
+    evidence_root = tmp_path / "evidence"
+    monkeypatch.setattr(integrations, "EVIDENCE_ROOT", evidence_root)
+
+    target_dir = evidence_root / str(execution_id) / "exec_1"
+    target_dir.mkdir(parents=True)
+    base_name = "http_webhook-post_json-result.json"
+    (target_dir / base_name).write_bytes(b"occupied")
+    stem = Path(base_name).stem
+    suffix = Path(base_name).suffix
+    for index in range(1, 10000):
+        (target_dir / f"{stem}-{index}{suffix}").write_bytes(b"occupied")
+
+    connector_result = {"status_code": 200, "body": {"ok": True}}
+    with patch.object(
+        HttpWebhookConnector,
+        "execute",
+        return_value=connector_result,
+    ):
+        resp = client.post(
+            "/api/integrations/http_webhook/actions/post_json",
+            headers={"X-API-Key": api_key},
+            json={"run_id": execution_id, "node_id": "exec_1", "body": {"event": "x"}},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == connector_result
+    assert resp.headers["x-hotwash-action-status"] == "completed"
+    assert resp.headers["x-hotwash-evidence-status"] == "failed"
+    with temp_db() as session:
+        assert json.loads(session.query(Execution).one().steps_json)[0]["evidence"] == []
+
+
+def test_connector_evidence_file_allocation_is_atomic_under_race(monkeypatch, tmp_path):
+    from api.routers import integrations
+
+    original_allocator = integrations._unique_evidence_path
+    first_choice = Barrier(2)
+
+    def force_same_initial_choice(target_dir, filename):
+        candidate, stored_name = original_allocator(target_dir, filename)
+        if stored_name == filename:
+            first_choice.wait(timeout=5)
+        return candidate, stored_name
+
+    monkeypatch.setattr(integrations, "_unique_evidence_path", force_same_initial_choice)
+
+    def write(body):
+        return integrations._write_unique_evidence_file(tmp_path, "result.json", body)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(write, (b"first", b"second")))
+
+    paths = {path for path, _name in results}
+    names = {name for _path, name in results}
+    assert names == {"result.json", "result-1.json"}
+    assert {path.read_bytes() for path in paths} == {b"first", b"second"}
 
 
 def test_invalid_run_or_node_prevents_action_execution(client, temp_db, api_key):
