@@ -73,7 +73,7 @@ script template, mapping CRUD examples, HMAC scheme, cooldown semantics.
 
 ## Supporting work (lands as the pillars need it)
 
-- **Connector interface.** SOAR Execute nodes are template strings today. Define a connector contract so they can become live calls. Start with one connector (AdGuard, n8n webhook, or generic HTTP) and use that to shape the contract.
+- **Connector interface.** SHIPPED. SOAR Execute nodes can call registered backend connectors through `/api/integrations/{tool}/actions/{action}`. The contract is proven with TheHive plus `http_webhook`, and action results can attach to run steps as replayable evidence.
 - **CLI.** `hotwash run <playbook>` driven by the same engine as the UI. Useful as a Wazuh action target and as a fallback when the web UI is not available.
 - **ATT&CK mapping.** The `ATTACKMappingPanel.tsx` exists; finish wiring techniques to nodes and surface them in run reports.
 - **Storage migration tooling.** Already in place for the rebrand; reusable when the playbook schema next changes.

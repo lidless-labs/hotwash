@@ -20,6 +20,10 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 - TheHive integration: live `create_case`, `create_alert`, and
   `add_observable` SOAR actions with a structured client, Pydantic request
   schemas, and an opt-in live smoke test (`-m live`).
+- Connector interface for live SOAR actions: registered connectors expose
+  action schemas and dispatch through generic integration endpoints, with
+  TheHive behind the contract, a new `http_webhook.post_json` connector, and
+  optional action-result evidence attached to run steps.
 - Wazuh ingest hardening: route-aware forwarder template that serves
   multiple mappings from one integration script.
 - GitHub Actions CI running the full `scripts/verify` gate.

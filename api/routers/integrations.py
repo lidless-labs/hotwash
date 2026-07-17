@@ -1,32 +1,47 @@
-"""
-Integrations Router — CRUD + connection testing for external tool integrations.
-"""
+"""Integrations Router - CRUD, connection tests, and connector actions."""
 
+import hashlib
+import json
+import logging
 import re
 from datetime import datetime, timezone
-from typing import List
+from pathlib import Path
+from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from api.auth import get_api_key
 from api.crypto import decrypt_secret, encrypt_secret
 from api.database import get_db
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
+from api.integrations.connectors import get_connector
 from api.integrations.config import Integration
-from api.integrations.mock_data import MOCK_HANDLERS
+from api.integrations.mock_data import MOCK_HANDLERS, get_mock_action_result
 from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
 )
+from api.orm_models import Execution, ExecutionEvent, RunEvent
+from api.routers.executions import _unique_evidence_path, _validate_node_id_for_path
 from api.schemas import IntegrationOut, IntegrationUpdate
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
+from api.services import replay
+from api.services.executions import find_step, load_steps, now_iso, serialize_steps
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
+logger = logging.getLogger(__name__)
 
-VALID_TOOLS = {"thehive", "cortex", "wazuh", "misp"}
+VALID_TOOLS = {"thehive", "http_webhook", "cortex", "wazuh", "misp"}
 URL_PATTERN = re.compile(r"^https?://\S+$")
+EVIDENCE_ROOT = Path(__file__).resolve().parent.parent / "data" / "evidence"
+MAX_INLINE_CONNECTOR_RESULT_BYTES = 4096
+STEPS_JSON_CAS_MAX_RETRIES = 8
+EVIDENCE_FILE_CREATE_MAX_RETRIES = 8
 
 
 def _to_out(i: Integration) -> IntegrationOut:
@@ -204,66 +219,264 @@ def _raise_for_thehive_error(exc: TheHiveError) -> None:
     )
 
 
-@router.post("/integrations/thehive/actions/create_case")
-def thehive_create_case(payload: CreateCaseRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.create_case(
-            title=payload.title,
-            description=payload.description,
-            severity=payload.severity,
-            tlp=payload.tlp,
-            pap=payload.pap,
-            tags=payload.tags,
+def _schema_for_action(tool: str, action: str):
+    connector = get_connector(tool)
+    if connector is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")
+    schema = connector.actions().get(action)
+    if schema is None:
+        raise HTTPException(status_code=404, detail=f"Unknown action: {action}")
+    return connector, schema
+
+
+def _extract_run_context(body: dict[str, Any]) -> tuple[int | None, str | None, dict[str, Any]]:
+    payload = dict(body)
+    run_id = payload.pop("run_id", None)
+    node_id = payload.pop("node_id", None)
+    return run_id, node_id, payload
+
+
+def _validate_run_step(
+    db: Session,
+    run_id: int | None,
+    node_id: str | None,
+) -> tuple[Execution, list[dict[str, Any]], dict[str, Any]] | None:
+    if run_id is None or node_id is None:
+        return None
+    execution = db.query(Execution).filter(Execution.id == run_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    steps = load_steps(execution)
+    step = find_step(steps, node_id)
+    if step is None:
+        raise HTTPException(status_code=404, detail="Step not found")
+    _validate_node_id_for_path(node_id)
+    return execution, steps, step
+
+
+def _bound_connector_result(result: dict[str, Any], *, file_body: bytes) -> dict[str, Any]:
+    """Keep small connector results inline; summarize large ones deterministically."""
+    if len(file_body) <= MAX_INLINE_CONNECTOR_RESULT_BYTES:
+        return result
+    return {
+        "truncated": True,
+        "size_bytes": len(file_body),
+        "sha256": hashlib.sha256(file_body).hexdigest(),
+    }
+
+
+def _write_unique_evidence_file(
+    target_dir: Path,
+    filename: str,
+    body: bytes,
+) -> tuple[Path, str]:
+    """Create an evidence file exclusively, retrying only a concurrent name race."""
+    for _ in range(EVIDENCE_FILE_CREATE_MAX_RETRIES):
+        target_path, stored_name = _unique_evidence_path(target_dir, filename)
+        try:
+            with target_path.open("xb") as handle:
+                handle.write(body)
+        except FileExistsError:
+            continue
+        return target_path, stored_name
+    raise HTTPException(status_code=409, detail="Concurrent evidence filename allocation")
+
+
+def _attach_action_result(
+    db: Session,
+    execution_id: int,
+    node_id: str,
+    *,
+    tool: str,
+    action: str,
+    result: dict[str, Any],
+) -> None:
+    uploaded_at = now_iso()
+    body = json.dumps(result, default=str, indent=2, sort_keys=True).encode("utf-8")
+    inline_result = _bound_connector_result(result, file_body=body)
+    filename = f"{tool}-{action}-result.json"
+    _validate_node_id_for_path(node_id)
+    target_dir = EVIDENCE_ROOT / str(execution_id) / node_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path: Path | None = None
+    entry: dict[str, Any] | None = None
+
+    for _ in range(STEPS_JSON_CAS_MAX_RETRIES):
+        db.expire_all()
+        execution = db.query(Execution).filter(Execution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        expected_steps_json = execution.steps_json
+        steps = load_steps(execution)
+        step = find_step(steps, node_id)
+        if step is None:
+            raise HTTPException(status_code=404, detail="Step not found")
+
+        if entry is None:
+            target_path, stored_name = _write_unique_evidence_file(target_dir, filename, body)
+            entry = {
+                "filename": stored_name,
+                "size": len(body),
+                "uploaded_at": uploaded_at,
+                "content_type": "application/json",
+                "connector": tool,
+                "action": action,
+                "result": inline_result,
+            }
+
+        step["evidence"] = list(step.get("evidence") or []) + [entry]
+        new_steps_json = serialize_steps(steps)
+        updated = db.execute(
+            update(Execution)
+            .where(
+                Execution.id == execution_id,
+                Execution.steps_json == expected_steps_json,
+            )
+            .values(steps_json=new_steps_json)
         )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    case_id = result.get("_id")
-    number = result.get("number")
-    case_url = (
-        f"{integration.base_url.rstrip('/')}/cases/{number}/details" if number else None
+        if updated.rowcount == 1:
+            db.add(
+                ExecutionEvent(
+                    execution_id=execution_id,
+                    event_type="evidence_attached",
+                    description=(
+                        f"Connector action '{tool}.{action}' result attached to "
+                        f"'{step.get('node_label')}'"
+                    ),
+                )
+            )
+            db.add(
+                RunEvent(
+                    execution_id=execution_id,
+                    event_type=replay.STEP_EVIDENCE_ATTACHED,
+                    payload_json=json.dumps(
+                        {"node_id": node_id, "evidence": entry},
+                        default=str,
+                    ),
+                )
+            )
+            return
+        db.rollback()
+
+    if target_path is not None:
+        try:
+            target_path.unlink()
+        except OSError:
+            pass
+    raise HTTPException(status_code=409, detail="Concurrent execution update")
+
+
+def _validate_action_payload(schema, payload: dict[str, Any]):
+    try:
+        return schema.model_validate(payload)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+
+def _dispatch_connector_action(
+    tool: str,
+    action: str,
+    body: dict[str, Any],
+    db: Session,
+    *,
+    allow_mock_mode: bool = True,
+    response: Response | None = None,
+) -> dict[str, Any]:
+    connector, schema = _schema_for_action(tool, action)
+    integration = _get_integration(db, tool)
+    run_id, node_id, connector_payload = _extract_run_context(body)
+    run_context = _validate_run_step(db, run_id, node_id)
+    validated_payload = _validate_action_payload(schema, connector_payload)
+
+    if not integration.enabled:
+        raise HTTPException(status_code=400, detail="Integration disabled")
+    if integration.mock_mode:
+        if not allow_mock_mode:
+            raise HTTPException(status_code=400, detail="Cannot run live action in mock mode")
+        result = get_mock_action_result(tool, action)
+    else:
+        try:
+            result = connector.execute(action, validated_payload, integration)
+        except TheHiveError as exc:
+            _raise_for_thehive_error(exc)
+
+    if run_context is not None:
+        execution, _steps, _step = run_context
+        try:
+            _attach_action_result(
+                db,
+                execution.id,
+                str(node_id),
+                tool=tool,
+                action=action,
+                result=result,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Connector action %s.%s completed but evidence attachment failed",
+                tool,
+                action,
+            )
+            if response is None:
+                raise
+            response.headers["X-Hotwash-Action-Status"] = "completed"
+            response.headers["X-Hotwash-Evidence-Status"] = "failed"
+
+    return result
+
+
+@router.get("/integrations/{tool}/actions")
+def list_connector_actions(tool: str):
+    connector = get_connector(tool)
+    if connector is None:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")
+    return [
+        {"name": name, "schema": schema.model_json_schema()}
+        for name, schema in sorted(connector.actions().items())
+    ]
+
+
+@router.post("/integrations/thehive/actions/create_case")
+def thehive_create_case(payload: CreateCaseRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "create_case",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
     )
-    return {"case_id": case_id, "number": number, "url": case_url, "raw": result}
 
 
 @router.post("/integrations/thehive/actions/create_alert")
-def thehive_create_alert(payload: CreateAlertRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.create_alert(
-            type=payload.type,
-            source=payload.source,
-            source_ref=payload.source_ref,
-            title=payload.title,
-            description=payload.description,
-            severity=payload.severity,
-            tlp=payload.tlp,
-            pap=payload.pap,
-            observables=payload.observables,
-            tags=payload.tags,
-        )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    return {"alert_id": result.get("_id"), "raw": result}
+def thehive_create_alert(payload: CreateAlertRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "create_alert",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
 
 
 @router.post("/integrations/thehive/actions/add_observable")
-def thehive_add_observable(payload: AddObservableRequest, db: Session = Depends(get_db)):
-    integration = _get_integration(db, "thehive")
-    client = _build_thehive_client(integration)
-    try:
-        result = client.add_observable(
-            case_id=payload.case_id,
-            data_type=payload.data_type,
-            data=payload.data,
-            message=payload.message,
-            tlp=payload.tlp,
-            ioc=payload.ioc,
-            sighted=payload.sighted,
-            tags=payload.tags,
-        )
-    except TheHiveError as exc:
-        _raise_for_thehive_error(exc)
-    return {"observable_id": result.get("_id"), "raw": result}
+def thehive_add_observable(payload: AddObservableRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "add_observable",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
+
+
+@router.post("/integrations/{tool}/actions/{action}")
+def run_connector_action(
+    tool: str,
+    action: str,
+    response: Response,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    return _dispatch_connector_action(tool, action, payload, db, response=response)

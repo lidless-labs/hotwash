@@ -312,37 +312,36 @@ Generate playbook using AI (optional).
 }
 ```
 
-## SOAR Action Library
+## SOAR Connector Actions
 
-Built-in action templates for common platforms:
+Execute nodes can call backend connectors instead of only carrying template
+strings. A connector declares a `tool_name`, an action-to-Pydantic-schema map,
+`execute(action_name, validated_payload, integration_row)`, and
+`test_connection(integration_row)`.
 
-```typescript
-interface SOARAction {
-  id: string;
-  name: string;
-  description: string;
-  platform: 'splunk' | 'demisto' | 'fortisiem' | 'generic';
-  parameters: {
-    [key: string]: {
-      type: 'string' | 'ip' | 'domain' | 'file_hash' | 'email';
-      required: boolean;
-      default?: any;
-    };
-  };
-  script?: string;  // Automation template
-}
+The integration router exposes the action surface:
 
-// Examples
-const isolateHost: SOARAction = {
-  id: 'isolate_host',
-  name: 'Isolate Host from Network',
-  platform: 'generic',
-  parameters: {
-    hostname: { type: 'string', required: true },
-    duration_hours: { type: 'string', required: false, default: '24' },
-  },
-};
-```
+- `GET /api/integrations/{tool}/actions` returns action names and JSON schemas.
+- `POST /api/integrations/{tool}/actions/{action}` validates the action body,
+  checks the configured integration row, then dispatches through the registry.
+- Optional top-level `run_id` and `node_id` fields are removed from the
+  connector payload. When both are present, the JSON action result is attached
+  to that run step as evidence and emitted as a replayable
+  `step_evidence_attached` event.
+
+Implemented connectors:
+
+- `thehive`: wraps the existing live `create_case`, `create_alert`, and
+  `add_observable` actions with the same request and response shapes as the
+  legacy routes.
+- `http_webhook`: exposes `post_json`, joins an optional relative `path` to the
+  integration `base_url`, posts the provided JSON `body`, honors `verify_ssl`,
+  and sends `Authorization: Bearer <key>` when an API key is configured.
+
+Outbound connector HTTP calls use `resolve_and_pin_integration_url` and
+`apply_host_pinning`, so requests resolve once, validate every resolved
+address, connect to the pinned literal IP, preserve Host/SNI where needed, and
+do not follow redirects.
 
 ## 5 Variants
 

@@ -28,6 +28,7 @@ class Integration(Base):
 # Default integrations to seed
 DEFAULT_INTEGRATIONS = [
     {"tool_name": "thehive", "display_name": "TheHive"},
+    {"tool_name": "http_webhook", "display_name": "HTTP Webhook"},
     {"tool_name": "cortex", "display_name": "Cortex"},
     {"tool_name": "wazuh", "display_name": "Wazuh"},
     {"tool_name": "misp", "display_name": "MISP"},

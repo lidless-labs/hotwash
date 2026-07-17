@@ -66,6 +66,13 @@ def test_test_endpoint_rejects_without_api_key(client):
     assert resp.status_code in (401, 403)
 
 
+def test_thehive_action_routes_keep_typed_request_schemas(client):
+    schema = client.app.openapi()
+    request_schema = schema["paths"]["/api/integrations/thehive/actions/create_case"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+
+    assert request_schema == {"$ref": "#/components/schemas/CreateCaseRequest"}
+
+
 def _call_action(client, api_key, verb, payload):
     return client.post(
         f"/api/integrations/thehive/actions/{verb}",
@@ -76,10 +83,10 @@ def _call_action(client, api_key, verb, payload):
 
 def test_create_case_action_happy_path(client, configured_thehive, api_key):
     with patch(
-        "api.routers.integrations.resolve_and_pin_integration_url",
+        "api.integrations.connectors.resolve_and_pin_integration_url",
         side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
     ), \
-         patch("api.routers.integrations.TheHiveClient") as MockClient:
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
         MockClient.return_value.create_case.return_value = {
             "_id": "~123",
             "number": 42,
@@ -141,10 +148,10 @@ def test_create_case_rejects_when_no_api_key_configured(client, temp_db, api_key
 
 def test_create_case_maps_upstream_401_to_502(client, configured_thehive, api_key):
     with patch(
-        "api.routers.integrations.resolve_and_pin_integration_url",
+        "api.integrations.connectors.resolve_and_pin_integration_url",
         side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
     ), \
-         patch("api.routers.integrations.TheHiveClient") as MockClient:
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
         MockClient.return_value.create_case.side_effect = TheHiveError(
             "Invalid API key for TheHive", status_code=401, details={}
         )
@@ -157,10 +164,10 @@ def test_create_case_maps_upstream_401_to_502(client, configured_thehive, api_ke
 
 def test_create_alert_action_happy_path(client, configured_thehive, api_key):
     with patch(
-        "api.routers.integrations.resolve_and_pin_integration_url",
+        "api.integrations.connectors.resolve_and_pin_integration_url",
         side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
     ), \
-         patch("api.routers.integrations.TheHiveClient") as MockClient:
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
         MockClient.return_value.create_alert.return_value = {
             "_id": "~A1",
             "sourceRef": "wazuh-1",
@@ -196,10 +203,10 @@ def test_create_alert_action_happy_path(client, configured_thehive, api_key):
 
 def test_add_observable_action_happy_path(client, configured_thehive, api_key):
     with patch(
-        "api.routers.integrations.resolve_and_pin_integration_url",
+        "api.integrations.connectors.resolve_and_pin_integration_url",
         side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
     ), \
-         patch("api.routers.integrations.TheHiveClient") as MockClient:
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
         MockClient.return_value.add_observable.return_value = {"_id": "~O1"}
         resp = _call_action(
             client,
