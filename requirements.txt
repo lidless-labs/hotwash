@@ -17,7 +17,6 @@ python-multipart==0.0.32
 
 # Testing
 pytest==9.0.3
-jsonschema==4.26.0
 httpx==0.28.1
 # httpx2 is the official httpx successor (github.com/pydantic/httpx2, Tom
 # Christie / Pydantic Services). starlette's TestClient prefers it and warns

@@ -15,11 +15,11 @@ help:
 	@echo "  make test       - Run the full verification gate (scripts/verify)"
 	@echo ""
 
-# Install all dependencies
+# Install development and test dependencies
 install:
 	@echo "Installing backend dependencies into .venv..."
 	python3 -m venv .venv
-	.venv/bin/pip install -r requirements.txt
+	.venv/bin/pip install -r requirements-test.txt
 	@echo ""
 	@echo "Installing frontend dependencies..."
 	cd web && npm install

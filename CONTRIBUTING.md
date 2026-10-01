@@ -39,8 +39,8 @@ Hotwash is an incident-response runbook tool: a React web app, a FastAPI run eng
 git clone https://github.com/solomonneas/hotwash.git
 cd hotwash
 
-# Backend
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Backend development and tests
+python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt
 .venv/bin/uvicorn api.main:app --port 8000
 
 # Frontend
@@ -51,6 +51,8 @@ cd mcp && npm install && npm run build
 ```
 
 ## Verifying your change
+
+Install `requirements-test.txt` into the repo venv before running tests. It includes `requirements.txt` and the test-only schema validator. Backend-only installations use `requirements.txt`.
 
 There is a single verification entrypoint that mirrors CI:
 
