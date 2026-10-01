@@ -10,7 +10,7 @@ Before reporting any change complete, run the single verification entrypoint and
 It runs all component gates in order, so one green run covers any change (live tests stay auto-skipped).
 
 Per-component mapping, for reference when narrowing a failure:
-- Backend or shared change: `.venv/bin/python -m pytest api/tests/ -v` from the repo root (106 tests, live tests auto-skipped). Dependencies are pinned in `requirements.txt` and installed in the repo venv (`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`); the system python has older versions and is not the supported test environment.
+- Backend or shared change: `.venv/bin/python -m pytest api/tests/ -v` from the repo root (106 tests, live tests auto-skipped). Test dependencies are pinned in `requirements-test.txt`, which includes the API dependencies in `requirements.txt`, and installed in the repo venv (`python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt`). The system python has older versions and is not the supported test environment.
 - Parser change: also `python3 api/tests/run_parser_tests.py` (or `make test`, which runs both).
 - MCP change: `cd mcp && npm run typecheck`; packaging change: also `cd mcp && npm run build`.
 - Frontend change: `cd web && npm test && npm run build` (vitest covers the client-side parsers).

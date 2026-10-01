@@ -1,0 +1,6 @@
+# Hotwash API test dependencies
+# Includes the API dependencies for a complete test environment.
+-r requirements.txt
+
+# Evidence record schema validation (tests only)
+jsonschema==4.26.0

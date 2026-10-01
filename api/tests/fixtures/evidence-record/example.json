@@ -1,0 +1,59 @@
+{
+  "format": "evidence-record",
+  "format_version": "1",
+  "generator": {
+    "name": "hotwash",
+    "version": "0.1.0"
+  },
+  "exported_at": "2026-10-01T12:00:00Z",
+  "subject": {
+    "kind": "run",
+    "id": "42",
+    "title": "Suspicious host",
+    "incident_id": "INC-42"
+  },
+  "records": [
+    {
+      "id": "evidence:node_1:0",
+      "source": {
+        "tool": "hotwash",
+        "observed_at": "2026-10-01T11:00:00Z",
+        "ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "raw": {
+          "node_id": "node_1",
+          "filename": "ioc-list.txt",
+          "size": 12
+        }
+      },
+      "enrichment": [],
+      "decision": null
+    },
+    {
+      "id": "decision:node_1",
+      "source": {
+        "tool": "hotwash",
+        "observed_at": null,
+        "ref": null,
+        "raw": {
+          "node_id": "node_1",
+          "decision_taken": "Isolate host"
+        }
+      },
+      "enrichment": [],
+      "decision": {
+        "verdict": "unknown",
+        "rationale": "Isolate host",
+        "by": null,
+        "at": null
+      }
+    }
+  ],
+  "closeout": {
+    "status": "closed",
+    "resolution": null,
+    "impact": null,
+    "summary": null,
+    "closed_at": null,
+    "closed_by": null
+  }
+}

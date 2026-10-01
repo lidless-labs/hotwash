@@ -37,6 +37,10 @@ export interface ExecutionEvidence {
   filename: string;
   size: number;
   uploaded_at: string;
+  sha256?: string | null;
+  source_tool?: string | null;
+  source_ref?: string | null;
+  observed_at?: string | null;
 }
 
 export interface ExecutionStep {

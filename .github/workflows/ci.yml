@@ -31,10 +31,10 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install backend dependencies into repo venv
+      - name: Install backend test dependencies into repo venv
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -r requirements-test.txt
 
       - name: Install mcp dependencies
         run: npm ci
