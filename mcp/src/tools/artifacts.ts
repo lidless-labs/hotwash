@@ -12,10 +12,13 @@ export function registerArtifactTools(server: McpServer, client: HotwashClient):
       execution_id: z.number().int().positive(),
       node_id: z.string().min(1).describe("Step node_id from query_run."),
       filename: z.string().min(1).describe("Filename to save under, e.g. 'ioc-list.txt'."),
+      source_tool: z.string().min(1).max(1024).optional().describe("Originating tool name, retained as artifact provenance."),
+      source_ref: z.string().min(1).max(1024).optional().describe("Opaque upstream reference. Never fetched by Hotwash."),
+      observed_at: z.string().datetime({ offset: true }).max(64).regex(/(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$/).optional().describe("RFC3339 observation time with an explicit offset."),
       text: z.string().optional().describe("UTF-8 text content. Use for log snippets, JSON dumps, etc."),
       base64: z.string().optional().describe("Base64-encoded binary content. Use for images or non-text artifacts."),
     },
-    async ({ execution_id, node_id, filename, text, base64 }) => {
+    async ({ execution_id, node_id, filename, text, base64, source_tool, source_ref, observed_at }) => {
       if (!text && !base64) {
         return fail(new Error("Provide either 'text' or 'base64' content for the artifact."));
       }
@@ -29,6 +32,7 @@ export function registerArtifactTools(server: McpServer, client: HotwashClient):
           node_id,
           filename,
           new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+          { source_tool, source_ref, observed_at },
         );
         return ok({
           node_id: step.node_id,

@@ -6,6 +6,7 @@ REST + WebSocket endpoints for running incident playbooks step by step.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -17,6 +18,8 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
+    Request,
     HTTPException,
     Query,
     UploadFile,
@@ -32,6 +35,7 @@ from api.auth import get_api_key, is_valid_api_key
 from api.database import get_db, SessionLocal
 from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
 from api.services import replay
+from api.services.evidence_record import build_evidence_record, source_time
 from api.schemas import (
     ExecutionCreate,
     ExecutionDetail,
@@ -549,7 +553,11 @@ async def update_step(
 async def upload_evidence(
     execution_id: int,
     node_id: str,
+    request: Request,
     file: UploadFile = File(...),
+    source_tool: Optional[str] = Form(default=None, min_length=1, max_length=1024),
+    source_ref: Optional[str] = Form(default=None, min_length=1, max_length=1024),
+    observed_at: Optional[str] = Form(default=None, max_length=64),
     db: Session = Depends(get_db),
 ):
     execution = _ensure_execution(db, execution_id)
@@ -557,6 +565,17 @@ async def upload_evidence(
     step = find_step(steps, node_id)
     if step is None:
         raise HTTPException(status_code=404, detail="Step not found")
+
+    # Inspect raw fields too: multipart parsers may coerce empty optional fields
+    # to their default, but explicitly supplied empty provenance is invalid.
+    form = await request.form()
+    provenance = {}
+    for key, value in (("source_tool", source_tool), ("source_ref", source_ref), ("observed_at", observed_at)):
+        if key not in form:
+            continue
+        if not value or (key == "observed_at" and source_time(value) is None):
+            raise HTTPException(status_code=422, detail=f"Invalid artifact provenance: {key}")
+        provenance[key] = value
 
     body = await file.read()
     if len(body) > MAX_EVIDENCE_BYTES:
@@ -574,6 +593,8 @@ async def upload_evidence(
         "filename": stored_name,
         "size": len(body),
         "uploaded_at": uploaded_at,
+        "sha256": hashlib.sha256(body).hexdigest(),
+        **provenance,
     }
     evidence_list = list(step.get("evidence") or [])
     evidence_list.append(entry)
@@ -610,6 +631,22 @@ def get_timeline(execution_id: int, db: Session = Depends(get_db)):
         )
         for event in events
     ]
+
+
+@router.get("/executions/{execution_id}/export")
+def export_execution(
+    execution_id: int,
+    request: Request,
+    format: str = Query(default="evidence-record", pattern="^evidence-record$"),
+    db: Session = Depends(get_db),
+):
+    execution = _ensure_execution(db, execution_id)
+    try:
+        return build_evidence_record(execution, evidence_root=EVIDENCE_ROOT,
+                                     max_file_bytes=MAX_EVIDENCE_BYTES,
+                                     generator_version=request.app.version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/executions/{execution_id}/report")

@@ -143,6 +143,10 @@ class ExecutionEvidence(BaseModel):
     connector: Optional[str] = None
     action: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+    sha256: Optional[str] = None
+    source_tool: Optional[str] = None
+    source_ref: Optional[str] = None
+    observed_at: Optional[str] = None
 
 
 class ExecutionStep(BaseModel):

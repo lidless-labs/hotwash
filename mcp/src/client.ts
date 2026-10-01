@@ -114,10 +114,13 @@ export class HotwashClient {
     });
   }
 
-  attachArtifact(executionId: number, nodeId: string, filename: string, content: Uint8Array): Promise<ExecutionStep> {
+  attachArtifact(executionId: number, nodeId: string, filename: string, content: Uint8Array, provenance: { source_tool?: string; source_ref?: string; observed_at?: string } = {}): Promise<ExecutionStep> {
     const form = new FormData();
     const blob = new Blob([content]);
     form.append("file", blob, filename);
+    for (const [key, value] of Object.entries(provenance)) {
+      if (value !== undefined) form.append(key, value);
+    }
     return this.request<ExecutionStep>(
       `/api/executions/${executionId}/steps/${encodeURIComponent(nodeId)}/evidence`,
       { method: "POST", body: form },
