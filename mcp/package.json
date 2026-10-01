@@ -18,6 +18,7 @@
     "start": "node dist/index.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/tools/*.test.ts",
     "prepublishOnly": "npm run build"
   },
   "author": "Solomon Neas <me@solomonneas.dev>",

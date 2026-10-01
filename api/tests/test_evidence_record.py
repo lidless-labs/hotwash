@@ -402,3 +402,187 @@ def test_output_byte_limit_is_explicit_with_input_under_limit(client, run, temp_
     response = client.get(f'/api/executions/{rid}/export', headers=headers)
     assert response.status_code == 422
     assert response.json()['detail'] == 'Evidence record exceeds 4 MiB export limit'
+
+
+def _projection(steps, tmp_path, *, run_events=(), events=(), max_file_bytes=1024):
+    from types import SimpleNamespace
+    from api.services.evidence_record import build_evidence_record
+    execution = SimpleNamespace(id=42, steps_json=json.dumps(steps), context_json=None,
+                                run_events=run_events, events=events, incident_title='Historical run',
+                                incident_id=None, status='running')
+    return build_evidence_record(execution, evidence_root=tmp_path, max_file_bytes=max_file_bytes,
+                                 generator_version=None)
+
+
+@pytest.mark.parametrize('exists', [True, False])
+def test_export_hashes_repeated_file_only_once_per_export(tmp_path, monkeypatch, exists):
+    from api.services import evidence_record as service
+    target = tmp_path / '42' / 'collect'
+    target.mkdir(parents=True)
+    if exists:
+        (target / 'old.txt').write_bytes(b'old bytes')
+    original = service._file_hash
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, '_file_hash', counted)
+    steps = [{'node_id': 'collect', 'evidence': [{'filename': 'old.txt'} for _ in range(1000)]}]
+    expected = 'sha256:' + hashlib.sha256(b'old bytes').hexdigest() if exists else None
+    for _ in range(2):
+        document = _projection(steps, tmp_path)
+        assert all(record['source']['ref'] == expected for record in document['records'])
+    # Cache failures as well as hashes, but never carry a cache into another export.
+    assert len(calls) == 2
+
+
+def test_export_shares_hash_read_budget_across_files(tmp_path, monkeypatch):
+    from api.services import evidence_record as service
+    target = tmp_path / '42' / 'collect'
+    target.mkdir(parents=True)
+    for name in ('a', 'b', 'c'):
+        (target / name).write_bytes(b'123456')
+    original = service.os.read
+    read_bytes = []
+
+    def counted(fd, size):
+        chunk = original(fd, size)
+        read_bytes.append(len(chunk))
+        return chunk
+
+    monkeypatch.setattr(service.os, 'read', counted)
+    document = _projection([{'node_id': 'collect', 'evidence': [{'filename': name} for name in ('a', 'b', 'c')]}],
+                           tmp_path, max_file_bytes=10)
+    assert sum(read_bytes) <= 10
+    assert document['records'][0]['source']['ref'] == 'sha256:' + hashlib.sha256(b'123456').hexdigest()
+    assert all(record['source']['ref'] is None for record in document['records'][1:])
+
+
+@pytest.mark.parametrize('failure', ['read_error', 'growth'])
+def test_export_hash_budget_counts_failed_and_growing_reads(tmp_path, monkeypatch, failure):
+    from api.services import evidence_record as service
+    target = tmp_path / '42' / 'collect'
+    target.mkdir(parents=True)
+    (target / 'a').write_bytes(b'123456')
+    (target / 'b').write_bytes(b'abcdef')
+    original = service.os.read
+    read_bytes = []
+    calls = 0
+
+    def changed_read(fd, size):
+        nonlocal calls
+        calls += 1
+        if calls == 2 and failure == 'read_error':
+            raise OSError('simulated read failure after partial consumption')
+        chunk = original(fd, min(size, 3) if calls == 1 else size)
+        read_bytes.append(len(chunk))
+        if calls == 1 and failure == 'growth':
+            with (target / 'a').open('ab') as stream:
+                stream.write(b'grew beyond the export budget')
+        return chunk
+
+    monkeypatch.setattr(service.os, 'read', changed_read)
+    document = _projection([{'node_id': 'collect', 'evidence': [{'filename': 'a'}, {'filename': 'b'}]}],
+                           tmp_path, max_file_bytes=8)
+    assert sum(read_bytes) <= 8
+    assert all(record['source']['ref'] is None for record in document['records'])
+
+
+def test_export_hashes_file_at_exact_budget(tmp_path, monkeypatch):
+    from api.services import evidence_record as service
+    target = tmp_path / '42' / 'collect'
+    target.mkdir(parents=True)
+    (target / 'a').write_bytes(b'12345678')
+    (target / 'empty').write_bytes(b'')
+    document = _projection([{'node_id': 'collect', 'evidence': [{'filename': 'a'}, {'filename': 'empty'}]}],
+                           tmp_path, max_file_bytes=8)
+    assert [r['source']['ref'] for r in document['records']] == [
+        'sha256:' + hashlib.sha256(b'12345678').hexdigest(), 'sha256:' + hashlib.sha256(b'').hexdigest()]
+
+
+class _CountedTraversal(list):
+    visits = 0
+
+    def __iter__(self):
+        for value in super().__iter__():
+            self.visits += 1
+            yield value
+
+    def __reversed__(self):
+        for value in super().__reversed__():
+            self.visits += 1
+            yield value
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_export_indexes_decision_attribution_with_linear_traversal(tmp_path, monkeypatch, legacy):
+    from types import SimpleNamespace
+    from api.services import evidence_record as service
+    count = 1000
+    steps = [{'node_id': f'n{i}', 'node_label': f'Label {i}', 'decision_taken': 'Yes'} for i in range(count)]
+    label_reads = []
+
+    class CountedStep(dict):
+        def get(self, key, *args):
+            if key == 'node_label':
+                label_reads.append(key)
+            return super().get(key, *args)
+
+    original = service._export_json
+
+    def counted_steps(value, field, expected_type):
+        result = original(value, field, expected_type)
+        return [CountedStep(step) for step in result] if field == 'steps_json' else result
+
+    monkeypatch.setattr(service, '_export_json', counted_steps)
+    at = datetime(2026, 9, 29, 13, 0)
+    run_events = _CountedTraversal(SimpleNamespace(
+        id=i+1, event_type='step_decision_taken', created_at=at,
+        payload_json=json.dumps({'node_id': f'other{i}' if legacy else f'n{i}', 'decision': 'Yes', 'actor': f'actor{i}'}))
+        for i in range(count))
+    events = _CountedTraversal(SimpleNamespace(id=i+1, event_type='decision_taken', actor=f'actor{i}', timestamp=at,
+                                              description=f"Decision 'Yes' on 'Label {i}'") for i in range(count))
+    document = _projection(steps, tmp_path, run_events=run_events, events=events)
+    assert [r['decision']['by'] for r in document['records']] == [f'actor{i}' for i in range(count)]
+    assert all(r['decision']['at'] == '2026-09-29T13:00:00+00:00' for r in document['records'])
+    assert run_events.visits <= 2 * count
+    assert events.visits <= 2 * count
+    assert len(label_reads) <= 4 * count
+
+
+def test_indexed_decisions_keep_latest_matching_text_and_fork_boundary(tmp_path):
+    from types import SimpleNamespace
+    from api.services.replay import RUN_FORKED, STEP_DECISION_TAKEN
+    at = datetime(2026, 9, 29, 13, 0)
+
+    def decision_event(event_id, node_id, text, actor):
+        return SimpleNamespace(id=event_id, event_type=STEP_DECISION_TAKEN, created_at=at,
+                               payload_json=json.dumps({'node_id': node_id, 'decision': text, 'actor': actor}))
+
+    steps = [{'node_id': node, 'node_label': node, 'decision_taken': 'Yes'} for node in ('old', 'new', 'missing')]
+    run_events = [decision_event(1, 'old', 'Yes', 'before-fork'),
+                  SimpleNamespace(id=2, event_type=RUN_FORKED),
+                  decision_event(3, 'new', 'Yes', 'old-match'),
+                  decision_event(4, 'new', 'Yes', 'latest-match'),
+                  decision_event(5, 'new', 'No', 'different-text')]
+    legacy = [SimpleNamespace(id=9, event_type='decision_taken', actor='legacy', timestamp=at,
+                              description=f"Decision 'Yes' on '{node}'") for node in ('old', 'missing')]
+    decisions = [r['decision'] for r in _projection(steps, tmp_path, run_events=run_events, events=legacy)['records']]
+    assert [d['by'] for d in decisions] == [None, 'latest-match', None]
+    assert [d['at'] for d in decisions] == [None, '2026-09-29T13:00:00+00:00', None]
+
+
+def test_indexed_legacy_decisions_use_latest_id_and_count_nondecision_labels(tmp_path):
+    from types import SimpleNamespace
+    at = datetime(2026, 9, 29, 13, 0)
+    steps = [{'node_id': 'unique', 'node_label': 'Unique', 'decision_taken': 'Yes'},
+             {'node_id': 'duplicate', 'node_label': 'Duplicate', 'decision_taken': 'Yes'},
+             {'node_id': 'no-decision', 'node_label': 'Duplicate'}]
+    events = [SimpleNamespace(id=event_id, event_type='decision_taken', actor=actor, timestamp=at,
+                              description=f"Decision 'Yes' on '{label}'")
+              for event_id, actor, label in ((10, 'latest-id', 'Unique'), (2, 'older-id', 'Unique'),
+                                            (11, 'ambiguous', 'Duplicate'))]
+    decisions = [r['decision'] for r in _projection(steps, tmp_path, events=events)['records']]
+    assert [d['by'] for d in decisions] == ['latest-id', None]
