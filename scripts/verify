@@ -18,6 +18,9 @@ echo "==> api: pytest"
 echo "==> api: parser test runner"
 "$PY" api/tests/run_parser_tests.py
 
+echo "==> mcp: test"
+(cd mcp && npm test)
+
 echo "==> mcp: typecheck"
 (cd mcp && npm run typecheck)
 
