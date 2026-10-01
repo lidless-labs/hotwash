@@ -7,6 +7,7 @@ import math
 import os
 import re
 import stat
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -99,7 +100,13 @@ def _export_json(value: str | None, field: str, expected_type: type) -> Any:
     return parsed
 
 
-def _file_hash(root: Path, execution_id: int, node_id: str, filename: str, max_bytes: int) -> str | None:
+@dataclass
+class _HashBudget:
+    remaining: int
+
+
+def _file_hash(root: Path, execution_id: int, node_id: str, filename: str | None,
+               max_bytes: int, budget: _HashBudget) -> str | None:
     """Open each reconstructed component relative to a held directory descriptor.
 
     O_NOFOLLOW on directories and file blocks traversal and symlink replacement
@@ -120,16 +127,23 @@ def _file_hash(root: Path, execution_id: int, node_id: str, filename: str, max_b
         fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptors[-1])
         descriptors.append(fd)
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+        limit = min(max_bytes, budget.remaining)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
             return None
         digest = hashlib.sha256()
         total = 0
-        while chunk := os.read(fd, 65536):
+        while total < limit:
+            chunk = os.read(fd, min(65536, limit - total))
+            if not chunk:
+                return digest.hexdigest()
+            # Consumption survives errors and rejected hashes. Never read a
+            # probe byte beyond the shared budget, even if this file grows.
+            budget.remaining -= len(chunk)
             total += len(chunk)
-            if total > max_bytes:
-                return None
             digest.update(chunk)
-        return digest.hexdigest()
+        # At the exact boundary, inspect the held descriptor for growth rather
+        # than spending another byte to distinguish EOF from an oversized file.
+        return digest.hexdigest() if os.fstat(fd).st_size == total else None
     except (OSError, ValueError):
         return None
     finally:
@@ -137,29 +151,68 @@ def _file_hash(root: Path, execution_id: int, node_id: str, filename: str, max_b
             os.close(fd)
 
 
-def _decision(execution: Execution, step: dict, steps: list[dict]) -> dict:
+def _label_key(value: Any) -> Any:
+    """Preserve equality for historical JSON labels, including lists/objects."""
+    if isinstance(value, list):
+        return (list, tuple(_label_key(item) for item in value))
+    if isinstance(value, dict):
+        return (dict, frozenset((key, _label_key(item)) for key, item in value.items()))
+    return value
+
+
+@dataclass
+class _DecisionIndex:
+    matching: dict[tuple[str, str], tuple[Any, dict]]
+    last_fork: int
+    legacy: dict[str, Any]
+    label_counts: dict[Any, int]
+
+
+def _decision_index(execution: Execution, steps: list[dict]) -> _DecisionIndex:
+    index = _DecisionIndex({}, 0, {}, {})
+    has_decisions = False
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError('Invalid historical step shape')
+        label = _label_key(step.get('node_label'))
+        index.label_counts[label] = index.label_counts.get(label, 0) + 1
+        has_decisions |= step.get('decision_taken') is not None
+    if not has_decisions:
+        return index
+    # run_events is ordered by id. Keep the same last matching event as the
+    # former reverse scan, without parsing or visiting it for every decision.
+    for event in reversed(execution.run_events):
+        if event.event_type == RUN_FORKED:
+            index.last_fork = max(index.last_fork, event.id)
+        elif event.event_type == STEP_DECISION_TAKEN:
+            payload = _object_json(event.payload_json)
+            node_id, text = payload.get('node_id'), payload.get('decision')
+            if isinstance(node_id, str) and isinstance(text, str):
+                index.matching.setdefault((node_id, text), (event, payload))
+    if not index.last_fork:
+        for event in execution.events:
+            if event.event_type == 'decision_taken':
+                previous = index.legacy.get(event.description)
+                if previous is None or event.id > previous.id:
+                    index.legacy[event.description] = event
+    return index
+
+
+def _decision(step: dict, index: _DecisionIndex) -> dict:
     text = step['decision_taken']
     if not isinstance(text, str) or len(text) > 8192:
         raise ValueError('Decision text exceeds evidence-record v1 bounds')
     actor = at = None
-    last_fork = max((e.id for e in execution.run_events if e.event_type == RUN_FORKED), default=0)
-    matched = False
-    for event in reversed(execution.run_events):
-        if event.event_type != STEP_DECISION_TAKEN:
-            continue
-        payload = _object_json(event.payload_json)
-        if payload.get('node_id') == step.get('node_id') and payload.get('decision') == text:
-            matched = True
-            if event.id > last_fork:
-                actor = _text(payload.get('actor'))
-                at = event_time(event.created_at)
-            break
-    if not matched and not last_fork:
-        description = f"Decision '{text}' on '{step.get('node_label')}'"
-        candidates = [s for s in steps if s.get('node_label') == step.get('node_label')]
-        if len(candidates) == 1:
-            events = [e for e in execution.events if e.event_type == 'decision_taken' and e.description == description]
-            event = max(events, key=lambda e: e.id, default=None)
+    matched = index.matching.get((step.get('node_id'), text))
+    if matched is not None:
+        event, payload = matched
+        if event.id > index.last_fork:
+            actor = _text(payload.get('actor'))
+            at = event_time(event.created_at)
+    elif not index.last_fork:
+        label = step.get('node_label')
+        if index.label_counts[_label_key(label)] == 1:
+            event = index.legacy.get(f"Decision '{text}' on '{label}'")
             if event:
                 actor, at = _text(event.actor), event_time(event.timestamp)
     return {'verdict': text if text in VERDICTS else 'unknown', 'rationale': text, 'by': actor, 'at': at}
@@ -179,6 +232,11 @@ def build_evidence_record(execution: Execution, *, evidence_root: Path, max_file
     steps = _export_json(execution.steps_json, 'steps_json', list)
     context = _export_json(execution.context_json, 'context_json', dict)
     records = []
+    # Bound all fallback hashing in one export to the configured per-file cap.
+    # Stored valid digests do not require filesystem reads or consume budget.
+    hash_budget = _HashBudget(max(0, max_file_bytes))
+    file_hashes: dict[tuple[str, str | None], str | None] = {}
+    decisions = _decision_index(execution, steps)
     for step in steps:
         if not isinstance(step, dict):
             raise ValueError('Invalid historical step shape')
@@ -195,7 +253,13 @@ def build_evidence_record(execution: Execution, *, evidence_root: Path, max_file
                 raise ValueError('Invalid historical evidence shape')
             digest = item.get('sha256')
             if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
-                digest = _file_hash(evidence_root, execution.id, node_id, item.get('filename'), max_file_bytes)
+                filename = item.get('filename')
+                filename = filename if isinstance(filename, str) else None
+                key = (node_id, filename)
+                if key not in file_hashes:
+                    file_hashes[key] = _file_hash(evidence_root, execution.id, node_id, filename,
+                                                  max_file_bytes, hash_budget)
+                digest = file_hashes[key]
             raw = {key: item.get(key) if isinstance(item.get(key), str) else None
                    for key in ('filename', 'uploaded_at', 'connector', 'action', 'source_tool', 'source_ref', 'observed_at')}
             raw['size'] = item.get('size') if type(item.get('size')) is int and item['size'] >= 0 else None
@@ -204,7 +268,7 @@ def build_evidence_record(execution: Execution, *, evidence_root: Path, max_file
                                    source_time(item.get('observed_at')) or source_time(item.get('uploaded_at')),
                                    'sha256:' + digest if digest else None, raw))
         if step.get('decision_taken') is not None:
-            decision = _decision(execution, step, steps)
+            decision = _decision(step, decisions)
             records.append(_record(f'decision:{node_id}', 'hotwash', decision['at'], None,
                                    {'node_id': node_id, 'decision_taken': step['decision_taken']}, decision))
         if len(records) > 10000:
