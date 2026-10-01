@@ -744,7 +744,12 @@ def diff_executions(execution_id: int, other_id: int, db: Session = Depends(get_
 
 @ws_router.websocket("/executions/{execution_id}/live")
 async def execution_socket(websocket: WebSocket, execution_id: int):
-    if not is_valid_api_key(websocket.query_params.get("api_key")):
+    # A supplied header is authoritative, even if empty or invalid.
+    # Query authentication remains available for clients without a header.
+    api_key = websocket.headers.get("X-API-Key")
+    if api_key is None:
+        api_key = websocket.query_params.get("api_key")
+    if not is_valid_api_key(api_key):
         await websocket.close(code=4401)
         return
 

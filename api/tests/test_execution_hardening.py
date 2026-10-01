@@ -93,6 +93,35 @@ def test_execution_websocket_requires_valid_api_key(client, temp_db, api_key):
     assert invalid.value.code == 4401
 
 
+@pytest.mark.parametrize("query_key", [None, "valid", "wrong", ""])
+def test_execution_websocket_accepts_api_key_header(
+    client, temp_db, api_key, query_key
+):
+    execution_id = _create_execution(temp_db)
+    url = f"/api/executions/{execution_id}/live"
+    if query_key is not None:
+        url += f"?api_key={api_key if query_key == 'valid' else query_key}"
+
+    with client.websocket_connect(url, headers={"X-API-Key": api_key}) as websocket:
+        websocket.send_text("ping")
+
+
+@pytest.mark.parametrize("header_key", ["wrong", ""])
+@pytest.mark.parametrize("query_key", [None, "valid"])
+def test_execution_websocket_rejects_invalid_header_even_with_valid_query(
+    client, temp_db, api_key, header_key, query_key
+):
+    execution_id = _create_execution(temp_db)
+    url = f"/api/executions/{execution_id}/live"
+    if query_key == "valid":
+        url += f"?api_key={api_key}"
+
+    with pytest.raises(WebSocketDisconnect) as invalid:
+        with client.websocket_connect(url, headers={"X-API-Key": header_key}):
+            pass
+    assert invalid.value.code == 4401
+
+
 def test_evidence_upload_rejects_unsafe_filename_and_deduplicates(
     client,
     temp_db,
