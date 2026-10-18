@@ -148,8 +148,8 @@ without authentication. All MCP requests require a bearer token.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HOTWASH_MCP_HTTP_TOKEN` | required | Dedicated HTTP bearer token, distinct from the upstream API key and URL credentials |
-| `HOTWASH_MCP_HTTP_HOST` | loopback | Listener bind address |
+| `HOTWASH_MCP_HTTP_TOKEN` | required | Dedicated HTTP bearer token, at least 32 characters, distinct from the upstream API key and URL credentials |
+| `HOTWASH_MCP_HTTP_HOST` | loopback | Specific listener bind address; wildcard addresses are refused |
 | `HOTWASH_MCP_HTTP_PORT` | `3118` | Listener port |
 
 Keep the token in a secret store or a mode `0600` environment file. The HTTP
