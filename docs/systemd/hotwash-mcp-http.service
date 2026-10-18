@@ -1,0 +1,21 @@
+[Unit]
+Description=Hotwash MCP HTTP server
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hotwash
+ExecStart=/usr/bin/node /opt/hotwash/mcp/dist/index.js --http
+# Create this file with mode 0600, in a directory with mode 0700.
+EnvironmentFile=%h/.config/hotwash-mcp/http.env
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

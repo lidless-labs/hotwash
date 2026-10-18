@@ -133,3 +133,85 @@ The server speaks MCP over stdio. To smoke-test, point a compatible client at th
 ## License
 
 MIT - see the root [LICENSE](../LICENSE).
+
+## HTTP mode
+
+Build with `npm run build` in `mcp/`, then run from the repository root:
+
+```bash
+node mcp/dist/index.js --http
+```
+
+Without `--http`, the existing stdio transport is unchanged. HTTP uses stateful
+Streamable HTTP sessions at `/mcp`. `GET /healthz` returns only `{"status":"ok"}`
+without authentication. All MCP requests require a bearer token.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HOTWASH_MCP_HTTP_TOKEN` | required | Dedicated HTTP bearer token, distinct from the upstream API key and URL credentials |
+| `HOTWASH_MCP_HTTP_HOST` | loopback | Listener bind address |
+| `HOTWASH_MCP_HTTP_PORT` | `3118` | Listener port |
+
+Keep the token in a secret store or a mode `0600` environment file. The HTTP
+listener rejects untrusted Host and Origin headers before authentication, limits
+bodies to 1 MiB and sessions to 128, and expires sessions after 30 idle minutes.
+Request and header timeouts are 30 and 10 seconds. SIGTERM and SIGINT close
+sessions and the listener. Binding beyond loopback requires a trusted deployment
+with suitable network controls and TLS termination. Browser Origins are limited
+to loopback origins.
+
+### Claude Code over HTTP
+
+```json
+{
+  "mcpServers": {
+    "hotwash": {
+      "type": "http",
+      "url": "http://localhost:3118/mcp",
+      "headersHelper": "/path/to/helper HOTWASH_MCP_HTTP_TOKEN"
+    }
+  }
+}
+```
+
+The helper reads the named environment variable and prints a JSON object such as
+`{"Authorization":"Bearer ..."}`. Keep the token out of checked-in client config.
+
+### Codex over Streamable HTTP
+
+```toml
+[mcp_servers.hotwash]
+url = "http://localhost:3118/mcp"
+bearer_token_env_var = "HOTWASH_MCP_HTTP_TOKEN"
+```
+
+Export the token in the client environment. The server uses the same token from
+its own environment.
+
+### Shared incident state and artifact access
+
+Runs, step state, artifacts, and suggestions belong to the Hotwash backend
+and its database. They are intentionally shared between authorized agents
+working on the same incident, as they already are across separate stdio
+processes. Every mutation names an execution/node or suggestion explicitly.
+There is no MCP-process current-run pointer, pending approval queue, deferred
+tool set, shared mutable cache, rate limiter, or write-enable flag. Each HTTP
+session gets a fresh MCP server and API client. Cancellation, suggestion
+acceptance, and dismissal require `confirm: true` on every call. One client's
+confirmation cannot authorize another call. HTTP sessions are protocol isolation,
+not separate user accounts: token holders use the same upstream API identity
+and may deliberately operate on the same backend records. Coordinate concurrent
+edits to the same step using the backend's existing semantics.
+
+`hotwash_attach_artifact` uploads only the text or base64 bytes supplied in the
+call. `filename` is an upload label and `source_ref` is an opaque reference.
+Neither causes local file reads or URL fetching, in either transport. No HTTP
+local-file opt-in is needed because no local-path input exists.
+
+### Example user service
+
+See [hotwash-mcp-http.service](../docs/systemd/hotwash-mcp-http.service).
+Place upstream configuration and the dedicated HTTP token in
+`~/.config/hotwash-mcp/http.env`, with directory mode `0700` and file mode `0600`.
+Adjust the example installation paths before using it. The service example
+uses `NoNewPrivileges=true`, `PrivateTmp=true`, and `UMask=0077`.
