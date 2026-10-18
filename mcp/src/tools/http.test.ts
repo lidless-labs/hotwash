@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 function configure() {
   process.env.HOTWASH_URL = "http://example.invalid";
-  process.env.HOTWASH_API_KEY = "test-upstream-key";
+  process.env.HOTWASH_API_KEY = "test-upstream-key-at-least-32-characters";
   process.env.HOTWASH_MCP_HTTP_TOKEN = token;
   process.env.HOTWASH_MCP_HTTP_PORT = "0";
   process.env.HOTWASH_MCP_HTTP_HOST = "127.0.0.1";
@@ -92,15 +92,33 @@ for (const headers of [
     assert.equal(status, 403);
   });
 }
-for (const value of [undefined, "", "   ", "test-upstream-key", "url-user", "url-password"]) {
+for (const value of [undefined, "", "   ", "test-upstream-key-at-least-32-characters", "url-user-at-least-32-characters-long", "url-password-at-least-32-characters"]) {
   test(`refuses missing, blank, or upstream HTTP token: ${JSON.stringify(value)}`, async () => {
     configure();
-    process.env.HOTWASH_URL = "https://url-user:url-password@example.invalid";
+    process.env.HOTWASH_URL = "https://url-user-at-least-32-characters-long:url-password-at-least-32-characters@example.invalid";
     if (value === undefined) delete process.env.HOTWASH_MCP_HTTP_TOKEN;
     else process.env.HOTWASH_MCP_HTTP_TOKEN = value;
     await assert.rejects(createHttpServer(), /HOTWASH_MCP_HTTP_TOKEN/);
   });
 }
+test("refuses a token shorter than 32 characters", async () => {
+  configure();
+  process.env.HOTWASH_MCP_HTTP_TOKEN = "a".repeat(31);
+  await assert.rejects(start(), /at least 32 characters/);
+});
+for (const host of ["0.0.0.0", "::", "[::]"]) {
+  test(`refuses wildcard bind host ${host}`, async () => {
+    configure();
+    process.env.HOTWASH_MCP_HTTP_HOST = host;
+    await assert.rejects(start(), /not a wildcard/);
+  });
+}
+test("accepts a token with surrounding whitespace from a secrets file", async () => {
+  configure();
+  process.env.HOTWASH_MCP_HTTP_TOKEN = `  ${token}\n`;
+  const { client } = await connect(await start());
+  assert.ok((await client.listTools()).tools.some(tool => tool.name === "hotwash_start_run"));
+});
 for (const port of ["-1", "65536", "abc", "1.5", "3118suffix"]) {
   test(`refuses invalid port ${port}`, async () => {
     configure(); process.env.HOTWASH_MCP_HTTP_PORT = port;
