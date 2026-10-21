@@ -226,3 +226,23 @@ class TheHiveClient:
             payload["tags"] = tags
         encoded_case_id = quote(case_id, safe="")
         return self._request("POST", f"/api/v1/case/{encoded_case_id}/observable", json=payload)
+
+    def run_analyzer(
+        self,
+        *,
+        artifact_id: str,
+        analyzer_id: str,
+        cortex_id: str = "cortex0",
+    ) -> dict[str, Any]:
+        """Launch a Cortex analyzer through TheHive's Cortex link.
+
+        ``analyzer_id`` is the Cortex worker id, not the analyzer name.
+        Returns TheHive's launch response (job id and initial status). The job
+        status read route is not used here, so callers must not expect polling.
+        """
+        payload = {
+            "analyzerId": analyzer_id,
+            "cortexId": cortex_id,
+            "artifactId": artifact_id,
+        }
+        return self._request("POST", "/api/v1/connector/cortex/job", json=payload)

@@ -75,6 +75,24 @@ def test_connectors_declare_pydantic_action_schemas():
     assert issubclass(wazuh_actions["get_agents"], BaseModel)
     assert wazuh_actions["get_agent"].model_json_schema()["additionalProperties"] is False
 
+    thehive_actions = get_connector("thehive").actions()
+    assert set(thehive_actions) == {
+        "create_case",
+        "create_alert",
+        "add_observable",
+        "run_analyzer",
+    }
+    assert thehive_actions["run_analyzer"].model_json_schema()["additionalProperties"] is False
+
+
+def test_mock_thehive_run_analyzer_shape():
+    from api.integrations.mock_data import get_mock_thehive_action
+
+    result = get_mock_thehive_action("run_analyzer")
+    assert result["job_id"] == "~mock-cortex-job-1"
+    assert result["status"] == "Waiting"
+    assert result["raw"]["mock"] is True
+
 
 def test_http_webhook_posts_json_to_pinned_url(temp_db):
     from api.integrations.connectors import HttpWebhookPostJsonRequest, get_connector

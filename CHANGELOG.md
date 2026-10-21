@@ -6,6 +6,14 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 ## [Unreleased]
 
 ### Added
+- TheHive `run_analyzer` SOAR action: launches a Cortex analyzer on an
+  observable through TheHive's Cortex link
+  (`POST /integrations/thehive/actions/run_analyzer`), with strict id
+  validation, a client method, connector dispatch, mock response, and docs.
+  It launches only; no job polling or analyzer listing.
+- "Suspicious Binary Triage" seed playbook: Wazuh rootcheck hit to evidence
+  collection, TheHive case, Cortex hash analyzers, a manual package-verify
+  evidence step, and SOC-owner-gated false-positive and close-out decisions.
 - Maintainer-health docs: `SECURITY.md`, `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md`, GitHub issue templates (bug + feature), an issue
   config that disables blank issues and links the website and security

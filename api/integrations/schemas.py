@@ -42,3 +42,16 @@ class AddObservableRequest(_Strict):
     ioc: bool = False
     sighted: bool = False
     tags: list[str] = Field(default_factory=list)
+
+
+class RunAnalyzerRequest(_Strict):
+    """Launch a Cortex analyzer on an existing TheHive observable.
+
+    All three ids are sent in the JSON body, not the URL path, but they are
+    still validated strictly so a caller cannot smuggle path segments,
+    whitespace, or query strings into a value that reaches the upstream API.
+    """
+
+    artifact_id: str = Field(..., pattern=r"^~[A-Za-z0-9]+$", max_length=128)
+    analyzer_id: str = Field(..., pattern=r"^[A-Za-z0-9_-]+$", max_length=128)
+    cortex_id: str = Field(default="cortex0", pattern=r"^[A-Za-z0-9_-]+$", max_length=64)

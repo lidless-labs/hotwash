@@ -95,3 +95,31 @@ def test_seed_db_wrapper_seeds_playbooks_and_mappings(temp_db, monkeypatch):
     assert inserted >= 1
     assert playbook_count >= 1
     assert mapping_count == 1
+
+
+def test_seed_includes_suspicious_binary_triage_playbook(temp_db, monkeypatch):
+    import json
+
+    monkeypatch.delenv("HOTWASH_PLAYBOOK_SEED_DIR", raising=False)
+    monkeypatch.delenv("PLAYBOOK_FORGE_PLAYBOOK_SEED_DIR", raising=False)
+
+    with temp_db() as session:
+        seed(session)
+        playbook = (
+            session.query(Playbook).filter(Playbook.title == "Suspicious Binary Triage").one()
+        )
+        graph = json.loads(playbook.graph_json)
+
+    labels = " ".join(node["label"] for node in graph["nodes"]).lower()
+    decisions = [n for n in graph["nodes"] if n["type"] == "decision"]
+    markdown = playbook.content_markdown
+
+    assert len(decisions) == 4
+    assert "run_analyzer" in labels
+    assert "circlhashlookup_1_1" in labels and "misp_2_1" in labels
+    assert "means unknown" in markdown
+    assert "never evidence that a file is suspicious" in markdown
+    assert "never evidence that it is clean" in markdown
+    assert "relayed approvals" in markdown.lower() or "relayed by another" in markdown.lower()
+    # The playbook must not give Hotwash a command-runner capability.
+    assert "does not run commands on hosts" in markdown

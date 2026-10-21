@@ -83,6 +83,9 @@ def get_mock_thehive_action(action_name: str) -> dict:
         return {"alert_id": raw["_id"], "raw": raw}
     if action_name == "add_observable":
         return {"observable_id": raw["_id"], "raw": raw}
+    if action_name == "run_analyzer":
+        job = {**raw, "_id": "~mock-cortex-job-1", "status": "Waiting"}
+        return {"job_id": job["_id"], "status": job["status"], "raw": job}
     return {"mock": True, "action": action_name, "raw": raw}
 
 
