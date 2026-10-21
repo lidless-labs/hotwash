@@ -51,7 +51,8 @@ This is a manual evidence step. Hotwash does not run commands on hosts and has n
   - Page the SOC owner immediately and treat this as possible tampering
   - Do not propose a false positive
   - Preserve the case and the artifacts
-- Else if the package-verify verdict is package-unknown or the Hashlookup or MISP result is inconclusive
+- Else if the package-verify verdict is package-unknown or an analyzer job failed
+  - A Hashlookup miss alone does not count as inconclusive; it is unknown and is judged by the package-verify verdict
   - Request a second opinion from the security review route or a senior model reviewer
   - Send the second opinion together with all evidence to the SOC owner for the decision
 - Else if the package-verify verdict is match and there is no MISP hit
