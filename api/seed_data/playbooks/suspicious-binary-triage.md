@@ -36,11 +36,10 @@ Triage a Wazuh rootcheck "trojaned binary" style hit on a system binary. The goa
 
 
 ## Package Verification
-This is a manual evidence step. Hotwash does not run commands on hosts and has no shell, ssh, or command-runner capability.
-
-1. An operator or agent runs the external read-only package-verify tool against the same host, package, and file. The tool lives outside Hotwash, in the SOC stack tooling repository.
-2. Attach the tool's JSON verdict to this step as a run artifact. The verdict is one of match (the hypervisor's outside read agrees), match-unverified (the host's own report only, no outside view), mismatch, package-unknown, or error.
-3. Do not continue until the verdict artifact is attached.
+1. This is a manual evidence step. Hotwash does not run commands on hosts and has no shell, ssh, or command-runner capability.
+2. An operator or agent runs the external read-only package-verify tool against the same host, package, and file. The tool lives outside Hotwash, in the SOC stack tooling repository.
+3. Attach the tool's JSON verdict to this step as a run artifact. The verdict is one of match (the hypervisor's outside read agrees), match-unverified (the host's own report only, no outside view), mismatch, package-unknown, or error.
+4. Do not continue until the verdict artifact is attached.
 
 ## Decision
 1. A CIRCL Hashlookup miss alone is unknown. It does not count as inconclusive and it is not evidence either way. Judge the file by the package-verify verdict and the MISP result.
@@ -63,13 +62,8 @@ This is a manual evidence step. Hotwash does not run commands on hosts and has n
   - No match: do not draft a false-positive entry and stop here
 
 ## Narrow False-Positive Entry
-Only reached from the match and no MISP hit branch. The entry must name all four of these and nothing broader:
-1. Exact host
-2. Exact file path
-3. Exact SHA-256
-4. Exact package version
-
-Do not use wildcards, directory-wide entries, rule-wide suppressions, or entries that cover a package update. A new package version or a changed hash requires a new triage run.
+1. Only reached from the match and no MISP hit branch. The entry names exactly four things and nothing broader: the exact host, the exact file path, the exact SHA-256, and the exact package version.
+2. Do not use wildcards, directory-wide entries, rule-wide suppressions, or entries that cover a package update. A new package version or a changed hash requires a new triage run.
 
 ## SOC Owner Approval Gate
 1. Hotwash does not authenticate approvers and shares one API key across callers, so marking any step in this section complete is NOT approval. The approval is the SOC owner's own message in the channel of record. Record only a reference to that message (channel and time), never an agent's paraphrase. Agents must not resolve the next decision on their own.

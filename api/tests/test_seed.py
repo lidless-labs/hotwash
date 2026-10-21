@@ -114,8 +114,10 @@ def test_seed_includes_suspicious_binary_triage_playbook(temp_db, monkeypatch):
     decisions = [n for n in graph["nodes"] if n["type"] == "decision"]
     markdown = playbook.content_markdown
 
-    assert decisions
+    assert len(decisions) == 6
     assert "run_analyzer" in labels
+    assert "do not use wildcards" in labels
+    assert "manual evidence step" in labels
     assert "circlhashlookup_1_1" in labels and "misp_2_1" in labels
     assert "means unknown" in markdown
     assert "never evidence that a file is suspicious" in markdown
@@ -175,6 +177,7 @@ def test_triage_decisions_have_exactly_yes_and_no_edges_with_one_step_each():
     decisions = [n for n in graph.nodes if n.type == "decision"]
     assert decisions
     for d in decisions:
+        assert len(out[d.id]) == 2, d.label
         labelled = [e.label for e in out[d.id] if e.label]
         assert sorted(labelled) == ["no", "yes"], (d.label, labelled)
 
