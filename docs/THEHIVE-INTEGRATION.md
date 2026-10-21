@@ -108,7 +108,7 @@ Request:
 
 Hotwash sends `POST /api/v1/connector/cortex/job` with `{"analyzerId", "cortexId", "artifactId"}`. That launch call was verified against TheHive 5.7.5 with Cortex 4.1.0. The response is `{"job_id", "status", "raw"}` taken from TheHive's launch reply. Hotwash does not poll for results: no job-status read route is used because none has been verified, so read the finished report in TheHive. Likewise, Hotwash does not list analyzers (no verified listing endpoint), so look up the worker id for an analyzer such as `CIRCLHashlookup_1_1` in Cortex first.
 
-The seeded "Suspicious Binary Triage" playbook uses this action to run `CIRCLHashlookup_1_1` and `MISP_2_1` on each file hash, with the package verification and every approval kept as manual steps.
+The seeded "Suspicious Binary Triage" playbook uses this action to run `CIRCLHashlookup_1_1` and `MISP_2_1` on each file hash, with the package verification and every approval kept as manual steps. The approval gate is advisory in Hotwash until owner-identity approval exists, so marking it complete is not approval.
 
 ## Live smoke test
 

@@ -114,7 +114,7 @@ def test_seed_includes_suspicious_binary_triage_playbook(temp_db, monkeypatch):
     decisions = [n for n in graph["nodes"] if n["type"] == "decision"]
     markdown = playbook.content_markdown
 
-    assert len(decisions) == 4
+    assert len(decisions) == 5
     assert "run_analyzer" in labels
     assert "circlhashlookup_1_1" in labels and "misp_2_1" in labels
     assert "means unknown" in markdown
@@ -123,3 +123,30 @@ def test_seed_includes_suspicious_binary_triage_playbook(temp_db, monkeypatch):
     assert "relayed approvals" in markdown.lower() or "relayed by another" in markdown.lower()
     # The playbook must not give Hotwash a command-runner capability.
     assert "does not run commands on hosts" in markdown
+
+
+def test_suspicious_binary_triage_approval_gate_is_a_decision_node():
+    from api.parsers.markdown_parser import MarkdownParser
+
+    path = DEFAULT_PLAYBOOKS_DIR / "suspicious-binary-triage.md"
+    markdown = path.read_text(encoding="utf-8")
+    graph = MarkdownParser().parse(markdown)
+    nodes = {n.id: n for n in graph.nodes}
+
+    gate_header = next(n for n in graph.nodes if n.label == "SOC Owner Approval Gate")
+    # The node right after the gate header must be the decision, not a plain step.
+    gate_edge = next(e for e in graph.edges if e.source == gate_header.id)
+    gate = nodes[gate_edge.target]
+    assert gate.type == "decision"
+    assert "SOC owner approved directly" in gate.label
+
+    branches = [nodes[e.target] for e in graph.edges if e.source == gate.id]
+    assert {e.label for e in graph.edges if e.source == gate.id} == {"yes", "no"}
+    assert all(b.type == "step" for b in branches)
+
+    # The old numbered-list gate steps must be gone.
+    assert not any(
+        n.type == "step" and n.label.startswith("The SOC owner records approve or reject")
+        for n in graph.nodes
+    )
+    assert "does not authenticate approvers" in markdown

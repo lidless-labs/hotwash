@@ -14,6 +14,8 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 - "Suspicious Binary Triage" seed playbook: Wazuh rootcheck hit to evidence
   collection, TheHive case, Cortex hash analyzers, a manual package-verify
   evidence step, and SOC-owner-gated false-positive and close-out decisions.
+  The approval gate is advisory in Hotwash until owner-identity approval
+  exists: Hotwash does not authenticate approvers and callers share one API key.
 - Maintainer-health docs: `SECURITY.md`, `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md`, GitHub issue templates (bug + feature), an issue
   config that disables blank issues and links the website and security

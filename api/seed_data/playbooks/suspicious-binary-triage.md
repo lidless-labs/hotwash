@@ -9,7 +9,7 @@
 Triage a Wazuh rootcheck "trojaned binary" style hit on a system binary. The goal is to decide, with evidence, whether the file is a stock distribution file (a false positive) or a possible tampering or compromise. Nothing in this playbook closes a case or records a false positive on its own.
 
 ## Approval Rule
-No false-positive entry and no case closure ever happens without the SOC owner's direct approval. An approval relayed by another person, agent, chat message, or ticket comment does not count. The Hotwash execution engine has no dedicated approval step type, so every approval point below is a Decision node that only the SOC owner may resolve, with a note recorded on the step.
+No false-positive entry and no case closure ever happens without the SOC owner's direct approval. An approval relayed by another person, agent, chat message, or ticket comment does not count. Hotwash does not authenticate approvers and every caller shares one API key, so Hotwash cannot enforce this rule. The approval gate below is advisory, and marking its step complete is not approval.
 
 ## Interpretation Rule
 A CIRCL Hashlookup miss ("Non existing") means unknown. It is never evidence that a file is suspicious and never evidence that it is clean, because Hashlookup lags current distribution builds. Judge a hit or miss only together with the package-verify verdict and the MISP result.
@@ -69,11 +69,16 @@ Only reached from the match and no MISP hit branch. The entry must name all four
 Do not use wildcards, directory-wide entries, rule-wide suppressions, or entries that cover a package update. A new package version or a changed hash requires a new triage run.
 
 ## SOC Owner Approval Gate
-1. Present the evidence summary, the package-verify artifact, the analyzer results, and any second opinion to the SOC owner.
-2. The SOC owner records approve or reject on this step in their own words. Only the SOC owner's direct decision counts; relayed approvals are not accepted.
-3. Do not record the false-positive entry or close the case before this step is resolved by the SOC owner.
+Hotwash does not authenticate approvers and shares one API key across callers. Marking a step in this section complete is NOT approval, and nothing in Hotwash proves who completed it. The approval itself is the SOC owner's own message in the channel of record. The step records only a reference to that message (where and when), never an agent's paraphrase of it. Agents must not resolve this step on their own. They record the reference only after the SOC owner has approved directly.
+
+- If the SOC owner approved directly in their own message in the channel of record
+  - Record only a reference to that message, meaning the channel and the time it was posted
+  - Continue to Close Out
+- Else
+  - Present the evidence summary, the package-verify artifact, the analyzer results, and any second opinion to the SOC owner and wait for their own reply
+  - Do not record the false-positive entry or close the case until the SOC owner approves directly
 
 ## Close Out
-1. After direct SOC owner approval, record the narrow false-positive entry in the detection tuning system and note its location on the case.
-2. After direct SOC owner approval, close the TheHive case with a summary that lists the hashes, the package-verify verdict, and the analyzer results.
+1. Only after the SOC owner approved directly, record the narrow false-positive entry in the detection tuning system and note its location on the case.
+2. Only after the SOC owner approved directly, close the TheHive case with a summary that lists the hashes, the package-verify verdict, and the analyzer results.
 3. If the SOC owner rejected the entry or escalated, leave the case open and record the next action.
