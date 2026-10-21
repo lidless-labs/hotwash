@@ -39,7 +39,7 @@ Triage a Wazuh rootcheck "trojaned binary" style hit on a system binary. The goa
 This is a manual evidence step. Hotwash does not run commands on hosts and has no shell, ssh, or command-runner capability.
 
 1. An operator or agent runs the external read-only package-verify tool against the same host, package, and file. The tool lives outside Hotwash, in the SOC stack tooling repository.
-2. Attach the tool's JSON verdict to this step as a run artifact. The verdict is one of match, mismatch, or package-unknown.
+2. Attach the tool's JSON verdict to this step as a run artifact. The verdict is one of match (the hypervisor's outside read agrees), match-unverified (the host's own report only, no outside view), mismatch, package-unknown, or error.
 3. Do not continue until the verdict artifact is attached.
 
 ## Decision
@@ -53,7 +53,7 @@ This is a manual evidence step. Hotwash does not run commands on hosts and has n
   - Possible tampering: page the SOC owner immediately, preserve the case and the artifacts, do not propose a false positive, and stop here
 - Else
   - The verdict is not mismatch: continue to the next check
-- If the package-verify verdict is package-unknown or an analyzer job failed
+- If the package-verify verdict is package-unknown, match-unverified, or error, or an analyzer job failed
   - Inconclusive: request a second opinion from the security review route or a senior model reviewer, send it with all evidence to the SOC owner for the decision, do not propose a false positive, and stop here
 - Else
   - The evidence is conclusive: continue to the match check

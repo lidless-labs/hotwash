@@ -187,6 +187,8 @@ def test_triage_terminal_branches_say_stop_and_never_propose_false_positive():
         text = yes.label.lower()
         assert "stop here" in text
         assert "do not propose a false positive" in text
+    unverified = _decision(nodes, "match-unverified")
+    assert "package-unknown" in unverified.label
     no_match = _decision(nodes, "is match and there is no MISP hit")
     no_branch = next(nodes[e.target] for e in out[no_match.id] if e.label == "no")
     assert "stop here" in no_branch.label.lower()
