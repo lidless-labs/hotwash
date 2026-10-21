@@ -9,10 +9,10 @@
 Triage a Wazuh rootcheck "trojaned binary" style hit on a system binary. The goal is to decide, with evidence, whether the file is a stock distribution file (a false positive) or a possible tampering or compromise. Nothing in this playbook closes a case or records a false positive on its own.
 
 ## Approval Rule
-No false-positive entry and no case closure ever happens without the SOC owner's direct approval. An approval relayed by another person, agent, chat message, or ticket comment does not count. Hotwash does not authenticate approvers and every caller shares one API key, so Hotwash cannot enforce this rule. The approval gate below is advisory, and marking its step complete is not approval.
+1. No false-positive entry and no case closure ever happens without the SOC owner's direct approval. An approval relayed by another person, agent, chat message, or ticket comment does not count. Hotwash does not authenticate approvers and every caller shares one API key, so Hotwash cannot enforce this rule. The approval gate below is advisory, and marking its step complete is not approval.
 
 ## Interpretation Rule
-A CIRCL Hashlookup miss ("Non existing") means unknown. It is never evidence that a file is suspicious and never evidence that it is clean, because Hashlookup lags current distribution builds. Judge a hit or miss only together with the package-verify verdict and the MISP result.
+1. A CIRCL Hashlookup miss ("Non existing") means unknown. It is never evidence that a file is suspicious and never evidence that it is clean, because Hashlookup lags current distribution builds. Judge a hit or miss only together with the package-verify verdict and the MISP result.
 
 ## Trigger
 1. Accept the Wazuh ingest suggestion for the rootcheck hit into a run. Record the alert reference and the affected file path on the run.
@@ -43,21 +43,24 @@ This is a manual evidence step. Hotwash does not run commands on hosts and has n
 3. Do not continue until the verdict artifact is attached.
 
 ## Decision
+1. A CIRCL Hashlookup miss alone is unknown. It does not count as inconclusive and it is not evidence either way. Judge the file by the package-verify verdict and the MISP result.
+
 - If any MISP analyzer reported a hit on any hash
-  - Page the SOC owner immediately and treat this as a possible incident
-  - Do not propose a false positive
-  - Preserve the case and the artifacts, and continue under the incident response process
-- Else if the package-verify verdict is mismatch
-  - Page the SOC owner immediately and treat this as possible tampering
-  - Do not propose a false positive
-  - Preserve the case and the artifacts
-- Else if the package-verify verdict is package-unknown or an analyzer job failed
-  - A Hashlookup miss alone does not count as inconclusive; it is unknown and is judged by the package-verify verdict
-  - Request a second opinion from the security review route or a senior model reviewer
-  - Send the second opinion together with all evidence to the SOC owner for the decision
-- Else if the package-verify verdict is match and there is no MISP hit
-  - Draft a narrow false-positive entry for the exact host, the exact file path, the exact SHA-256, and the exact package version
-  - Send the draft to the SOC owner for approval
+  - Possible incident: page the SOC owner immediately, preserve the case and the artifacts, do not propose a false positive, and stop here
+- Else
+  - No MISP hit: continue to the package-verify check
+- If the package-verify verdict is mismatch
+  - Possible tampering: page the SOC owner immediately, preserve the case and the artifacts, do not propose a false positive, and stop here
+- Else
+  - The verdict is not mismatch: continue to the next check
+- If the package-verify verdict is package-unknown or an analyzer job failed
+  - Inconclusive: request a second opinion from the security review route or a senior model reviewer, send it with all evidence to the SOC owner for the decision, do not propose a false positive, and stop here
+- Else
+  - The evidence is conclusive: continue to the match check
+- If the package-verify verdict is match and there is no MISP hit
+  - Draft a narrow false-positive entry for the exact host, the exact file path, the exact SHA-256, and the exact package version, then continue to the approval gate
+- Else
+  - No match: do not draft a false-positive entry and stop here
 
 ## Narrow False-Positive Entry
 Only reached from the match and no MISP hit branch. The entry must name all four of these and nothing broader:
@@ -69,16 +72,15 @@ Only reached from the match and no MISP hit branch. The entry must name all four
 Do not use wildcards, directory-wide entries, rule-wide suppressions, or entries that cover a package update. A new package version or a changed hash requires a new triage run.
 
 ## SOC Owner Approval Gate
-Hotwash does not authenticate approvers and shares one API key across callers. Marking a step in this section complete is NOT approval, and nothing in Hotwash proves who completed it. The approval itself is the SOC owner's own message in the channel of record. The step records only a reference to that message (where and when), never an agent's paraphrase of it. Agents must not resolve this step on their own. They record the reference only after the SOC owner has approved directly.
+1. Hotwash does not authenticate approvers and shares one API key across callers, so marking any step in this section complete is NOT approval. The approval is the SOC owner's own message in the channel of record. Record only a reference to that message (channel and time), never an agent's paraphrase. Agents must not resolve the next decision on their own.
 
-- If the SOC owner approved directly in their own message in the channel of record
-  - Record only a reference to that message, meaning the channel and the time it was posted
-  - Continue to Close Out
+- If a reference to the SOC owner's own direct approval message has been recorded (Hotwash does not authenticate this reference)
+  - Record the reference only: the channel and the time the SOC owner posted it, then continue to Close Out
 - Else
   - Present the evidence summary, the package-verify artifact, the analyzer results, and any second opinion to the SOC owner and wait for their own reply
-  - Do not record the false-positive entry or close the case until the SOC owner approves directly
 
 ## Close Out
-1. Only after the SOC owner approved directly, record the narrow false-positive entry in the detection tuning system and note its location on the case.
-2. Only after the SOC owner approved directly, close the TheHive case with a summary that lists the hashes, the package-verify verdict, and the analyzer results.
-3. If the SOC owner rejected the entry or escalated, leave the case open and record the next action.
+- If the SOC owner approved directly
+  - Record the narrow false-positive entry in the detection tuning system, note its location on the case, and close the TheHive case with a summary that lists the hashes, the package-verify verdict, and the analyzer results
+- Else
+  - Leave the case open, do not record the false-positive entry, and record the next action

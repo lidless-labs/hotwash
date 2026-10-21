@@ -107,7 +107,7 @@ def test_run_analyzer_defaults_cortex_id():
 def test_run_analyzer_accepts_real_ids():
     req = RunAnalyzerRequest(
         artifact_id="~12304",
-        analyzer_id="CIRCLHashlookup_1_1",
+        analyzer_id="0123456789abcdef0123456789abcdef",
         cortex_id="cortex-lab_1",
     )
     assert req.artifact_id == "~12304"

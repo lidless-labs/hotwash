@@ -114,7 +114,7 @@ def test_seed_includes_suspicious_binary_triage_playbook(temp_db, monkeypatch):
     decisions = [n for n in graph["nodes"] if n["type"] == "decision"]
     markdown = playbook.content_markdown
 
-    assert len(decisions) == 5
+    assert decisions
     assert "run_analyzer" in labels
     assert "circlhashlookup_1_1" in labels and "misp_2_1" in labels
     assert "means unknown" in markdown
@@ -134,11 +134,13 @@ def test_suspicious_binary_triage_approval_gate_is_a_decision_node():
     nodes = {n.id: n for n in graph.nodes}
 
     gate_header = next(n for n in graph.nodes if n.label == "SOC Owner Approval Gate")
-    # The node right after the gate header must be the decision, not a plain step.
-    gate_edge = next(e for e in graph.edges if e.source == gate_header.id)
-    gate = nodes[gate_edge.target]
+    # The header leads to the unauthenticated-approval warning step, then the decision.
+    warning = nodes[next(e.target for e in graph.edges if e.source == gate_header.id)]
+    assert warning.type == "step"
+    assert "does not authenticate approvers" in warning.label
+    gate = nodes[next(e.target for e in graph.edges if e.source == warning.id)]
     assert gate.type == "decision"
-    assert "SOC owner approved directly" in gate.label
+    assert "SOC owner's own direct approval message" in gate.label
 
     branches = [nodes[e.target] for e in graph.edges if e.source == gate.id]
     assert {e.label for e in graph.edges if e.source == gate.id} == {"yes", "no"}
@@ -150,3 +152,89 @@ def test_suspicious_binary_triage_approval_gate_is_a_decision_node():
         for n in graph.nodes
     )
     assert "does not authenticate approvers" in markdown
+
+
+def _parsed_triage_graph():
+    from api.parsers.markdown_parser import MarkdownParser
+
+    path = DEFAULT_PLAYBOOKS_DIR / "suspicious-binary-triage.md"
+    graph = MarkdownParser().parse(path.read_text(encoding="utf-8"))
+    nodes = {n.id: n for n in graph.nodes}
+    out = {}
+    for e in graph.edges:
+        out.setdefault(e.source, []).append(e)
+    return graph, nodes, out
+
+
+def _decision(nodes, fragment):
+    return next(n for n in nodes.values() if n.type == "decision" and fragment in n.label)
+
+
+def test_triage_decisions_have_exactly_yes_and_no_edges_with_one_step_each():
+    graph, nodes, out = _parsed_triage_graph()
+    decisions = [n for n in graph.nodes if n.type == "decision"]
+    assert decisions
+    for d in decisions:
+        labelled = [e.label for e in out[d.id] if e.label]
+        assert sorted(labelled) == ["no", "yes"], (d.label, labelled)
+
+
+def test_triage_terminal_branches_say_stop_and_never_propose_false_positive():
+    graph, nodes, out = _parsed_triage_graph()
+    for fragment in ("MISP analyzer reported a hit", "verdict is mismatch", "package-unknown"):
+        d = _decision(nodes, fragment)
+        yes = next(nodes[e.target] for e in out[d.id] if e.label == "yes")
+        text = yes.label.lower()
+        assert "stop here" in text
+        assert "do not propose a false positive" in text
+    no_match = _decision(nodes, "is match and there is no MISP hit")
+    no_branch = next(nodes[e.target] for e in out[no_match.id] if e.label == "no")
+    assert "stop here" in no_branch.label.lower()
+    assert "do not draft a false-positive" in no_branch.label.lower()
+    # Only the match branch drafts a false-positive entry.
+    drafters = [n for n in graph.nodes if n.label.lower().startswith("draft a narrow")]
+    assert len(drafters) == 1
+    assert [e.label for e in out[no_match.id] if e.target == drafters[0].id] == ["yes"]
+
+
+def test_triage_gate_no_branch_cannot_reach_case_closure_without_another_decision():
+    graph, nodes, out = _parsed_triage_graph()
+    gate = _decision(nodes, "direct approval message")
+    close_steps = [n for n in graph.nodes if "close the thehive case" in n.label.lower()]
+    assert len(close_steps) == 1
+    closer = close_steps[0]
+
+    # Walk from the gate's no branch, never expanding past a decision node.
+    start = next(e.target for e in out[gate.id] if e.label == "no")
+    seen, stack, reached_decisions = set(), [start], set()
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        assert cur != closer.id
+        if nodes[cur].type == "decision":
+            reached_decisions.add(cur)
+            continue
+        stack.extend(e.target for e in out.get(cur, []))
+    assert reached_decisions, "the no branch must hit another decision before Close Out"
+
+    # The closure step is only the yes branch of the Close Out decision.
+    close_decision = _decision(nodes, "SOC owner approved directly")
+    yes = next(e.target for e in out[close_decision.id] if e.label == "yes")
+    assert yes == closer.id
+    no = next(nodes[e.target] for e in out[close_decision.id] if e.label == "no")
+    assert "leave the case open" in no.label.lower()
+    assert "close the thehive case" not in no.label.lower()
+
+
+def test_triage_unauthenticated_approval_warning_is_a_parsed_node():
+    graph, nodes, out = _parsed_triage_graph()
+    labels = [n.label for n in graph.nodes]
+    assert any("does not authenticate approvers" in l for l in labels)
+    gate = _decision(nodes, "direct approval message")
+    assert "does not authenticate" in gate.label
+    # The warning step sits immediately before the gate decision.
+    pred = next(e.source for e in graph.edges if e.target == gate.id)
+    assert "does not authenticate approvers" in nodes[pred].label
+    assert any("Hashlookup miss" in l and "unknown" in l for l in labels)

@@ -104,7 +104,7 @@ Request:
 }
 ```
 
-`artifact_id` is the TheHive observable id (`~` followed by alphanumerics). `analyzer_id` is the Cortex worker id, not the analyzer name, and `cortex_id` defaults to `cortex0`. All three are validated against strict patterns, so path segments, whitespace, and query strings are rejected with `422`.
+`artifact_id` is the TheHive observable id (`~` followed by alphanumerics). `analyzer_id` is the Cortex worker id, not the analyzer name, and `cortex_id` defaults to `cortex0` and allows only letters, digits, `_` and `-`. All three are validated against strict patterns, so path segments, whitespace, and query strings are rejected with `422`.
 
 Hotwash sends `POST /api/v1/connector/cortex/job` with `{"analyzerId", "cortexId", "artifactId"}`. That launch call was verified against TheHive 5.7.5 with Cortex 4.1.0. The response is `{"job_id", "status", "raw"}` taken from TheHive's launch reply. Hotwash does not poll for results: no job-status read route is used because none has been verified, so read the finished report in TheHive. Likewise, Hotwash does not list analyzers (no verified listing endpoint), so look up the worker id for an analyzer such as `CIRCLHashlookup_1_1` in Cortex first.
 
