@@ -71,6 +71,7 @@ from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
+    RunAnalyzerRequest,
 )
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
 
@@ -98,6 +99,7 @@ class TheHiveConnector:
             "create_case": CreateCaseRequest,
             "create_alert": CreateAlertRequest,
             "add_observable": AddObservableRequest,
+            "run_analyzer": RunAnalyzerRequest,
         }
 
     def _client(self, integration_row: Any) -> TheHiveClient:
@@ -162,6 +164,15 @@ class TheHiveConnector:
                 tags=payload.tags,
             )
             return {"observable_id": result.get("_id"), "raw": result}
+
+        if action_name == "run_analyzer":
+            payload = _as(RunAnalyzerRequest, validated_payload)
+            result = client.run_analyzer(
+                artifact_id=payload.artifact_id,
+                analyzer_id=payload.analyzer_id,
+                cortex_id=payload.cortex_id,
+            )
+            return {"job_id": result.get("_id"), "status": result.get("status"), "raw": result}
 
         raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}")
 

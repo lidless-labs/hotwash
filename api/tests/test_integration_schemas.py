@@ -9,6 +9,7 @@ from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
+    RunAnalyzerRequest,
 )
 
 
@@ -96,3 +97,43 @@ def test_add_observable_accepts_real_thehive_ids():
     for ok in ["~123", "~8288", "~40964216", "~A1"]:
         req = AddObservableRequest(case_id=ok, data_type="ip", data="1.2.3.4")
         assert req.case_id == ok
+
+
+def test_run_analyzer_defaults_cortex_id():
+    req = RunAnalyzerRequest(artifact_id="~12304", analyzer_id="0123456789abcdef0123456789abcdef")
+    assert req.cortex_id == "cortex0"
+
+
+def test_run_analyzer_accepts_real_ids():
+    req = RunAnalyzerRequest(
+        artifact_id="~12304",
+        analyzer_id="0123456789abcdef0123456789abcdef",
+        cortex_id="cortex-lab_1",
+    )
+    assert req.artifact_id == "~12304"
+    assert req.cortex_id == "cortex-lab_1"
+
+
+def test_run_analyzer_rejects_unsafe_ids():
+    bad_values = [
+        "~123/job",
+        "../etc/passwd",
+        "~123?x=1",
+        "~123#frag",
+        "~123 with space",
+        "no-tilde",
+        "",
+    ]
+    for bad in bad_values:
+        with pytest.raises(ValidationError):
+            RunAnalyzerRequest(artifact_id=bad, analyzer_id="abc123")
+    for bad in ["a/b", "a b", "a?b", "a\\nb", "..", "", "a%2fb"]:
+        with pytest.raises(ValidationError):
+            RunAnalyzerRequest(artifact_id="~1", analyzer_id=bad)
+        with pytest.raises(ValidationError):
+            RunAnalyzerRequest(artifact_id="~1", analyzer_id="abc", cortex_id=bad)
+
+
+def test_run_analyzer_rejects_extra_fields():
+    with pytest.raises(ValidationError):
+        RunAnalyzerRequest(artifact_id="~1", analyzer_id="abc", url="http://evil")

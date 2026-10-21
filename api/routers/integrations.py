@@ -26,6 +26,7 @@ from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
+    RunAnalyzerRequest,
 )
 from api.orm_models import Execution, ExecutionEvent, RunEvent
 from api.routers.executions import _unique_evidence_path, _validate_node_id_for_path
@@ -480,6 +481,17 @@ def thehive_add_observable(payload: AddObservableRequest = Body(...), db: Sessio
     return _dispatch_connector_action(
         "thehive",
         "add_observable",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
+
+
+@router.post("/integrations/thehive/actions/run_analyzer")
+def thehive_run_analyzer(payload: RunAnalyzerRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "run_analyzer",
         payload.model_dump(),
         db,
         allow_mock_mode=False,

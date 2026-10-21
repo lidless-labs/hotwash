@@ -300,3 +300,43 @@ def test_add_observable_url_encodes_case_id():
         client.add_observable(case_id="weird/path?x=y", data_type="ip", data="1.2.3.4")
     url = mocked.call_args[0][1]
     assert url == "http://example:9000/api/v1/case/weird%2Fpath%3Fx%3Dy/observable"
+
+
+def test_run_analyzer_posts_to_cortex_job_endpoint():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(
+            201, json_body={"_id": "~J1", "status": "Waiting"}
+        )
+        result = client.run_analyzer(
+            artifact_id="~12304",
+            analyzer_id="0123456789abcdef0123456789abcdef",
+        )
+    args, kwargs = mocked.call_args
+    assert args[0] == "POST"
+    assert args[1] == "http://example:9000/api/v1/connector/cortex/job"
+    assert kwargs["json"] == {
+        "analyzerId": "0123456789abcdef0123456789abcdef",
+        "cortexId": "cortex0",
+        "artifactId": "~12304",
+    }
+    assert kwargs["allow_redirects"] is False
+    assert result["_id"] == "~J1"
+
+
+def test_run_analyzer_custom_cortex_id():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~J2"})
+        client.run_analyzer(artifact_id="~1", analyzer_id="abc", cortex_id="cortex1")
+    assert mocked.call_args[1]["json"]["cortexId"] == "cortex1"
+
+
+def test_run_analyzer_surfaces_upstream_error_without_api_key():
+    client = TheHiveClient(base_url="http://example:9000", api_key="super-secret-key")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(400, json_body={"type": "InvalidInput"})
+        with pytest.raises(TheHiveError) as excinfo:
+            client.run_analyzer(artifact_id="~1", analyzer_id="abc")
+    assert excinfo.value.status_code == 400
+    assert "super-secret-key" not in str(excinfo.value)

@@ -91,6 +91,25 @@ Request:
 }
 ```
 
+### `POST /api/integrations/thehive/actions/run_analyzer`
+
+Launches a Cortex analyzer on an existing observable through TheHive's Cortex link.
+
+Request:
+```json
+{
+  "artifact_id": "~12304",
+  "analyzer_id": "0123456789abcdef0123456789abcdef",
+  "cortex_id": "cortex0"
+}
+```
+
+`artifact_id` is the TheHive observable id (`~` followed by alphanumerics). `analyzer_id` is the Cortex worker id, not the analyzer name, and `cortex_id` defaults to `cortex0` and allows only letters, digits, `_` and `-`. All three are validated against strict patterns, so path segments, whitespace, and query strings are rejected with `422`.
+
+Hotwash sends `POST /api/v1/connector/cortex/job` with `{"analyzerId", "cortexId", "artifactId"}`. That launch call was verified against TheHive 5.7.5 with Cortex 4.1.0. The response is `{"job_id", "status", "raw"}` taken from TheHive's launch reply. Hotwash does not poll for results: no job-status read route is used because none has been verified, so read the finished report in TheHive. Likewise, Hotwash does not list analyzers (no verified listing endpoint), so look up the worker id for an analyzer such as `CIRCLHashlookup_1_1` in Cortex first.
+
+The seeded "Suspicious Binary Triage" playbook uses this action to run `CIRCLHashlookup_1_1` and `MISP_2_1` on each file hash, with the package verification and every approval kept as manual steps. The approval gate is advisory in Hotwash until owner-identity approval exists, so marking it complete is not approval.
+
 ## Live smoke test
 
 ```bash
@@ -105,5 +124,5 @@ Cleanup: live tests tag cases/alerts with `hotwash-live-test`; sweep via TheHive
 ## Not yet supported
 
 - `update_case` / `close_case` (planned)
-- Cortex analyzer invocation (separate integration)
+- Cortex analyzer listing and job result polling (`run_analyzer` only launches a job)
 - Webhook receivers from TheHive (Hotwash currently ingests from Wazuh; reverse direction is roadmap)

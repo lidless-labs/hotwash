@@ -236,3 +236,59 @@ def test_add_observable_action_happy_path(client, configured_thehive, api_key):
 def test_action_payload_validation_422(client, configured_thehive, api_key):
     resp = _call_action(client, api_key, "create_case", {"description": "y"})
     assert resp.status_code == 422
+
+
+def test_run_analyzer_action_happy_path(client, configured_thehive, api_key):
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
+    ), \
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
+        MockClient.return_value.run_analyzer.return_value = {
+            "_id": "~J1",
+            "status": "Waiting",
+        }
+        resp = _call_action(
+            client,
+            api_key,
+            "run_analyzer",
+            {"artifact_id": "~12304", "analyzer_id": "abc123"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "~J1"
+    assert body["status"] == "Waiting"
+    MockClient.return_value.run_analyzer.assert_called_once_with(
+        artifact_id="~12304",
+        analyzer_id="abc123",
+        cortex_id="cortex0",
+    )
+
+
+def test_run_analyzer_rejects_bad_artifact_id(client, configured_thehive, api_key):
+    resp = _call_action(
+        client,
+        api_key,
+        "run_analyzer",
+        {"artifact_id": "~1/../x", "analyzer_id": "abc123"},
+    )
+    assert resp.status_code == 422
+
+
+def test_run_analyzer_rejects_when_mock_mode(client, temp_db, api_key):
+    from api.integrations.config import Integration
+
+    with temp_db() as session:
+        i = session.query(Integration).filter_by(tool_name="thehive").first()
+        i.enabled = True
+        i.mock_mode = True
+        i.base_url = "http://example:9000"
+        session.commit()
+    resp = _call_action(
+        client,
+        api_key,
+        "run_analyzer",
+        {"artifact_id": "~1", "analyzer_id": "abc123"},
+    )
+    assert resp.status_code == 400
+    assert "mock" in resp.json()["detail"].lower()
