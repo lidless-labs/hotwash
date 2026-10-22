@@ -88,6 +88,19 @@ def test_active_response_dry_run_still_enforces_the_allowlist(client, temp_db, a
     assert resp.status_code == 422
 
 
+def test_active_response_dry_run_reports_the_request_in_mock_mode(client, temp_db, api_key, monkeypatch):
+    # Mock mode never reaches a manager, so it needs no allow-list; a dry run
+    # still reports the request instead of returning the canned result.
+    monkeypatch.delenv("HOTWASH_WAZUH_AR_COMMANDS", raising=False)
+    _enable_wazuh(temp_db, mock_mode=True)
+
+    resp = client.post(AR_URL, headers={"X-API-Key": api_key}, json={**AR_BODY, "dry_run": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["dry_run"] is True
+    assert resp.json()["would_run"]["command"] == "firewall-drop"
+
+
 # --- Key scopes and read-only mode -----------------------------------------
 
 

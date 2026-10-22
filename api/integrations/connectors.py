@@ -305,6 +305,32 @@ class HttpWebhookConnector:
         }
 
 
+def preflight_active_response(
+    validated_payload: BaseModel, *, enforce_policy: bool = True
+) -> dict[str, Any] | None:
+    """Apply the active-response policy; return the dry-run report when requested.
+
+    Raises 403/422 for a disabled or disallowed command when ``enforce_policy``
+    is set. Wazuh has no dry-run mode for active response, so a dry run stops
+    before any upstream call and reports the request that would be sent. The
+    mock-mode dispatcher passes ``enforce_policy=False``: mock mode never reaches
+    a manager, so it needs no allow-list, but a dry run still reports the request.
+    """
+    payload = _as(WazuhRunActiveResponseRequest, validated_payload)
+    if enforce_policy:
+        _enforce_active_response_allowlist(payload.command)
+    if not payload.dry_run:
+        return None
+    return {
+        "dry_run": True,
+        "would_run": {
+            "command": payload.command,
+            "agent_ids": payload.agent_ids,
+            "arguments": payload.arguments,
+        },
+    }
+
+
 class WazuhConnector:
     tool_name = "wazuh"
 
@@ -356,19 +382,10 @@ class WazuhConnector:
         raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}")
 
     def _run_active_response(self, validated_payload: BaseModel, integration_row: Any) -> dict[str, Any]:
+        dry_run = preflight_active_response(validated_payload)
+        if dry_run is not None:
+            return dry_run
         payload = _as(WazuhRunActiveResponseRequest, validated_payload)
-        _enforce_active_response_allowlist(payload.command)
-        if payload.dry_run:
-            # Wazuh has no dry-run mode for active response, so stop before any
-            # upstream call and report the request that would have been sent.
-            return {
-                "dry_run": True,
-                "would_run": {
-                    "command": payload.command,
-                    "agent_ids": payload.agent_ids,
-                    "arguments": payload.arguments,
-                },
-            }
         client = self._client(integration_row)
         result = client.run_active_response(
             command=payload.command,
