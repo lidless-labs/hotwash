@@ -74,9 +74,25 @@ def test_active_response_dry_run_never_contacts_wazuh(client, temp_db, api_key, 
 
     assert resp.status_code == 200
     assert resp.json()["dry_run"] is True
-    assert resp.json()["would_run"] == {"command": "firewall-drop", "agent_ids": ["001"], "arguments": []}
+    assert resp.json()["would_run"] == {
+        "command": "firewall-drop",
+        "agent_ids": ["001"],
+        "arguments": [],
+        "alert": {},
+    }
     MockClient.assert_not_called()
     pin.assert_not_called()
+
+
+def test_active_response_dry_run_includes_the_alert(client, temp_db, api_key, monkeypatch):
+    monkeypatch.setenv("HOTWASH_WAZUH_AR_COMMANDS", "firewall-drop")
+    _enable_wazuh(temp_db)
+    alert = {"rule": {"id": "5710"}}
+
+    resp = client.post(AR_URL, headers={"X-API-Key": api_key}, json={**AR_BODY, "dry_run": True, "alert": alert})
+
+    assert resp.status_code == 200
+    assert resp.json()["would_run"]["alert"] == alert
 
 
 def test_active_response_dry_run_still_enforces_the_allowlist(client, temp_db, api_key, monkeypatch):

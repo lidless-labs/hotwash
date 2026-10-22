@@ -327,6 +327,7 @@ def preflight_active_response(
             "command": payload.command,
             "agent_ids": payload.agent_ids,
             "arguments": payload.arguments,
+            "alert": payload.alert,
         },
     }
 
