@@ -133,7 +133,7 @@ export function registerRunTools(server: McpServer, client: HotwashClient, polic
       reason: z.string().optional().describe("Free-form reason recorded as an execution note."),
       confirm: z.literal(true).describe("Must be true. Acknowledges the run will be marked abandoned."),
     },
-    mutatingTool({ destructive: true, idempotent: true }),
+    mutatingTool({ destructive: true, idempotent: false }),
     async ({ execution_id, reason, confirm }) => {
       const blocked = guardMutation(policy, "abandon this execution");
       if (blocked) return blocked;

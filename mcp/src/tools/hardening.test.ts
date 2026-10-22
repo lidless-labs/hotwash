@@ -106,6 +106,8 @@ test("every tool declares all four annotation hints, matching its behavior", asy
   for (const name of ["hotwash_cancel_run", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion"]) {
     assert.equal(byName.get(name)?.destructiveHint, true, name);
   }
+  // Re-submitting an abandon appends another run event, so a retry is not a no-op.
+  assert.equal(byName.get("hotwash_cancel_run")?.idempotentHint, false);
 });
 
 // --- mutation gate ---------------------------------------------------------------
