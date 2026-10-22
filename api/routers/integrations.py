@@ -19,7 +19,7 @@ from api.crypto import decrypt_secret, encrypt_secret
 from api.database import get_db
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
 from api.integrations.clients.wazuh import WazuhError
-from api.integrations.connectors import get_connector
+from api.integrations.connectors import get_connector, preflight_active_response
 from api.integrations.config import Integration
 from api.integrations.mock_data import MOCK_HANDLERS, get_mock_action_result
 from api.integrations.schemas import (
@@ -179,7 +179,10 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
             timeout=5,
             verify=integration.verify_ssl,
             allow_redirects=False,
+            stream=True,
         )
+        # Only the status code is used; drop the body without buffering it.
+        resp.close()
         if resp.status_code in (200, 401, 403):
             integration.last_status = "connected"
         else:
@@ -406,7 +409,16 @@ def _dispatch_connector_action(
 
     if not integration.enabled:
         raise HTTPException(status_code=400, detail="Integration disabled")
-    if integration.mock_mode:
+    # A dry run reports the request instead of the canned mock result. The
+    # allow-list guards live manager calls, so mock mode skips it.
+    preflight = (
+        preflight_active_response(validated_payload, enforce_policy=not integration.mock_mode)
+        if tool == "wazuh" and action == "run_active_response"
+        else None
+    )
+    if preflight is not None:
+        result = preflight
+    elif integration.mock_mode:
         if not allow_mock_mode:
             raise HTTPException(status_code=400, detail="Cannot run live action in mock mode")
         result = get_mock_action_result(tool, action)

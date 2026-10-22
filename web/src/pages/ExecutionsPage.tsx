@@ -4,7 +4,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useHashRouter } from '../router';
-import { API_BASE_URL, API_KEY } from '../api/client';
+import { API_BASE_URL } from '../api/client';
+import { authHeaders } from '../api/auth';
 import { parseApiDate, relativeTime } from '../lib/time';
 
 interface Execution {
@@ -67,7 +68,7 @@ const ExecutionsPage: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/executions`, {
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
       });
       if (!res.ok) throw new Error('Failed to fetch');
@@ -85,7 +86,7 @@ const ExecutionsPage: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/playbooks`, {
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
       });
       if (!res.ok) return;
@@ -107,7 +108,7 @@ const ExecutionsPage: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
         body: JSON.stringify({
           playbook_id: newPlaybookId,

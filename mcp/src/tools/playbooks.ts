@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { HotwashClient } from "../client.js";
-import { fail, ok } from "./_util.js";
+import { fail, ok, READ_ONLY_TOOL } from "./_util.js";
 
 export function registerPlaybookTools(server: McpServer, client: HotwashClient): void {
   server.tool(
@@ -12,18 +12,23 @@ export function registerPlaybookTools(server: McpServer, client: HotwashClient):
       tag: z.string().optional().describe("Filter by tag name."),
       search: z.string().optional().describe("Free-text search across title and description."),
     },
+    READ_ONLY_TOOL,
     async ({ category, tag, search }) => {
       try {
         const playbooks = await client.listPlaybooks({ category, tag, search });
         return ok(
-          playbooks.map((p) => ({
-            id: p.id,
-            title: p.title,
-            category: p.category ?? null,
-            tags: (p.tags ?? []).map((t) => t.name),
-            node_count: p.node_count ?? 0,
-            description: p.description ?? null,
-          })),
+          {
+            count: playbooks.length,
+            playbooks: playbooks.map((p) => ({
+              id: p.id,
+              title: p.title,
+              category: p.category ?? null,
+              tags: (p.tags ?? []).map((t) => t.name),
+              node_count: p.node_count ?? 0,
+              description: p.description ?? null,
+            })),
+          },
+          ["playbooks[].title", "playbooks[].category", "playbooks[].tags", "playbooks[].description"],
         );
       } catch (error) {
         return fail(error);
@@ -37,19 +42,23 @@ export function registerPlaybookTools(server: McpServer, client: HotwashClient):
     {
       playbook_id: z.number().int().positive().describe("Numeric playbook id from list_playbooks."),
     },
+    READ_ONLY_TOOL,
     async ({ playbook_id }) => {
       try {
         const playbook = await client.getPlaybook(playbook_id);
-        return ok({
-          id: playbook.id,
-          title: playbook.title,
-          description: playbook.description ?? null,
-          category: playbook.category ?? null,
-          tags: (playbook.tags ?? []).map((t) => t.name),
-          node_count: playbook.node_count ?? 0,
-          versions_count: playbook.versions_count ?? 0,
-          graph: playbook.graph_json ?? null,
-        });
+        return ok(
+          {
+            id: playbook.id,
+            title: playbook.title,
+            description: playbook.description ?? null,
+            category: playbook.category ?? null,
+            tags: (playbook.tags ?? []).map((t) => t.name),
+            node_count: playbook.node_count ?? 0,
+            versions_count: playbook.versions_count ?? 0,
+            graph: playbook.graph_json ?? null,
+          },
+          ["title", "description", "category", "tags", "graph"],
+        );
       } catch (error) {
         return fail(error);
       }

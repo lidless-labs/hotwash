@@ -90,7 +90,7 @@ Add it to your MCP client config:
 }
 ```
 
-Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), and `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`).
+Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools; the server is read-only otherwise).
 
 ### Tools
 
@@ -109,7 +109,7 @@ The server registers 10 tools, all prefixed `hotwash_`:
 | `hotwash_accept_suggestion` | Promote a pending suggestion into a real execution, carrying its Wazuh alert as context. Destructive; requires `confirm: true`. |
 | `hotwash_dismiss_suggestion` | Dismiss a pending suggestion as noise and anchor the mapping cooldown. Destructive; requires `confirm: true`. |
 
-Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) refuse to act unless the caller passes `confirm: true`, so an agent cannot abandon a run or burn through the suggestion queue by accident.
+State-changing tools (`hotwash_start_run`, `hotwash_advance_step`, `hotwash_attach_artifact`, `hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) run only when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` on the MCP server. Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) additionally refuse to act unless the caller passes `confirm: true`, and the API enforces the same confirmation, so a direct HTTP call cannot skip it. Results are typed, size-bounded, and mark upstream-written fields as untrusted.
 
 ---
 

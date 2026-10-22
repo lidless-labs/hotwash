@@ -179,6 +179,8 @@ class ExecutionUpdate(BaseModel):
 
     status: Optional[str] = None
     notes: Optional[str] = None
+    # Required when status is "abandoned"; ignored otherwise.
+    confirm: Optional[bool] = None
 
 
 class ExecutionStepUpdate(BaseModel):

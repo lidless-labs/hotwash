@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_bounded
 from api.security import PinnedURL, apply_host_pinning
 
 
@@ -93,6 +94,14 @@ class WazuhClient:
             details=details if isinstance(details, dict) else {"body": details},
         )
 
+    @staticmethod
+    def _too_large(exc: UpstreamResponseTooLarge) -> WazuhError:
+        return WazuhError(
+            "Wazuh response exceeded the size limit",
+            status_code=None,
+            details={"upstream": "response_too_large", "limit_bytes": exc.limit},
+        )
+
     def _authenticate(self) -> str:
         url = f"{self._request_base}/security/user/authenticate"
         try:
@@ -104,7 +113,11 @@ class WazuhClient:
                 timeout=self.timeout,
                 verify=self.verify_ssl,
                 allow_redirects=False,
+                stream=True,
             )
+            read_bounded(response)
+        except UpstreamResponseTooLarge as exc:
+            raise self._too_large(exc) from exc
         except requests.RequestException as exc:
             raise WazuhError(
                 f"Wazuh authentication request failed: {self._sanitize_value(str(exc))}",
@@ -165,7 +178,11 @@ class WazuhClient:
                 timeout=self.timeout,
                 verify=self.verify_ssl,
                 allow_redirects=False,
+                stream=True,
             )
+            read_bounded(response)
+        except UpstreamResponseTooLarge as exc:
+            raise self._too_large(exc) from exc
         except requests.RequestException as exc:
             raise WazuhError(
                 f"Wazuh request failed: {self._sanitize_value(str(exc))}",

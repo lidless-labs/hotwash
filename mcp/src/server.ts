@@ -17,11 +17,12 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   });
 
   const client = new HotwashClient(config);
+  const policy = { allowMutations: config.allowMutations === true };
 
   registerPlaybookTools(server, client);
-  registerRunTools(server, client);
-  registerArtifactTools(server, client);
-  registerSuggestionTools(server, client);
+  registerRunTools(server, client, policy);
+  registerArtifactTools(server, client, policy);
+  registerSuggestionTools(server, client, policy);
 
   return server;
 }

@@ -9,13 +9,13 @@ test("artifact tool validates and sends provenance through client multipart", as
   let schema: z.ZodObject<z.ZodRawShape> | undefined;
   let handler: ((args: Record<string, unknown>) => Promise<unknown>) | undefined;
   const server = {
-    tool(_name: string, _description: string, shape: z.ZodRawShape, callback: typeof handler) {
+    tool(_name: string, _description: string, shape: z.ZodRawShape, _annotations: unknown, callback: typeof handler) {
       schema = z.object(shape);
       handler = callback;
     },
   } as unknown as McpServer;
   const client = new HotwashClient({ url: "http://example.invalid", timeout: 30000 });
-  registerArtifactTools(server, client);
+  registerArtifactTools(server, client, { allowMutations: true });
   assert.ok(schema);
   assert.ok(handler);
   const input = { execution_id: 42, node_id: "collect", filename: "ioc.txt", text: "example bytes",

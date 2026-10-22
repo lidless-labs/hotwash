@@ -9,35 +9,32 @@ from typing import Annotated, Any, Protocol, Type
 
 import requests
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 logger = logging.getLogger(__name__)
 
 
-def _allowed_active_response_commands() -> set[str] | None:
+def _allowed_active_response_commands() -> set[str]:
     """Configured allow-list of permitted Wazuh active-response commands.
 
-    Returns the set from ``HOTWASH_WAZUH_AR_COMMANDS`` (comma-separated), or
-    ``None`` when unset (unrestricted, but the dispatch logs a warning). Setting
-    it restricts which response commands an API-key holder can fire at agents.
+    Reads ``HOTWASH_WAZUH_AR_COMMANDS`` (comma-separated). An unset or empty
+    value yields an empty set, which permits nothing: active response stays
+    disabled until an operator names the commands that may be dispatched.
     """
     raw = os.environ.get("HOTWASH_WAZUH_AR_COMMANDS", "").strip()
-    if not raw:
-        return None
     return {token.strip() for token in raw.split(",") if token.strip()}
 
 
 def _enforce_active_response_allowlist(command: str) -> None:
     allowed = _allowed_active_response_commands()
-    if allowed is None:
-        logger.warning(
-            "Wazuh active-response command %r dispatched with no "
-            "HOTWASH_WAZUH_AR_COMMANDS allow-list configured; any command "
-            "defined in the manager's ossec.conf can be triggered. Set "
-            "HOTWASH_WAZUH_AR_COMMANDS to restrict.",
-            command,
+    if not allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Wazuh active response is disabled; set HOTWASH_WAZUH_AR_COMMANDS "
+                "to the commands that may be dispatched"
+            ),
         )
-        return
     if command not in allowed:
         raise HTTPException(
             status_code=422,
@@ -65,6 +62,7 @@ def _decrypt_or_fail(encrypted: str | None, label: str) -> str | None:
     return plain
 
 from api.crypto import decrypt_secret
+from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_bounded
 from api.integrations.clients.thehive import TheHiveClient
 from api.integrations.clients.wazuh import WazuhClient, WazuhError
 from api.integrations.schemas import (
@@ -205,6 +203,17 @@ class WazuhRunActiveResponseRequest(_Strict):
     agent_ids: list[WazuhAgentId] = Field(min_length=1, max_length=100)
     arguments: list[WazuhActiveResponseArgument] = Field(default_factory=list, max_length=32)
     alert: dict[str, Any] = Field(default_factory=dict)
+    # Endpoint-affecting: the caller must opt in explicitly on every request.
+    confirm: StrictBool
+    # Validate the request and report what would run without contacting Wazuh.
+    dry_run: bool = False
+
+    @field_validator("confirm")
+    @classmethod
+    def _require_confirm(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("confirm must be true to run an active response")
+        return value
 
     @field_validator("alert")
     @classmethod
@@ -253,7 +262,14 @@ class HttpWebhookConnector:
                 timeout=10.0,
                 verify=integration_row.verify_ssl,
                 allow_redirects=False,
+                stream=True,
             )
+            read_bounded(response)
+        except UpstreamResponseTooLarge as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"message": "HTTP webhook response exceeded the size limit"},
+            ) from exc
         except requests.RequestException as exc:
             raise HTTPException(
                 status_code=502,
@@ -277,13 +293,43 @@ class HttpWebhookConnector:
                 timeout=5,
                 verify=integration_row.verify_ssl,
                 allow_redirects=False,
+                stream=True,
             )
+            # Only the status code is used; drop the body without buffering it.
+            response.close()
         except requests.RequestException as exc:
             return {"status": "disconnected", "error": str(exc)}
         return {
             "status": "connected" if response.status_code in (200, 401, 403, 404, 405) else "error",
             "status_code": response.status_code,
         }
+
+
+def preflight_active_response(
+    validated_payload: BaseModel, *, enforce_policy: bool = True
+) -> dict[str, Any] | None:
+    """Apply the active-response policy; return the dry-run report when requested.
+
+    Raises 403/422 for a disabled or disallowed command when ``enforce_policy``
+    is set. Wazuh has no dry-run mode for active response, so a dry run stops
+    before any upstream call and reports the request that would be sent. The
+    mock-mode dispatcher passes ``enforce_policy=False``: mock mode never reaches
+    a manager, so it needs no allow-list, but a dry run still reports the request.
+    """
+    payload = _as(WazuhRunActiveResponseRequest, validated_payload)
+    if enforce_policy:
+        _enforce_active_response_allowlist(payload.command)
+    if not payload.dry_run:
+        return None
+    return {
+        "dry_run": True,
+        "would_run": {
+            "command": payload.command,
+            "agent_ids": payload.agent_ids,
+            "arguments": payload.arguments,
+            "alert": payload.alert,
+        },
+    }
 
 
 class WazuhConnector:
@@ -314,6 +360,9 @@ class WazuhConnector:
         )
 
     def execute(self, action_name: str, validated_payload: BaseModel, integration_row: Any) -> dict[str, Any]:
+        if action_name == "run_active_response":
+            return self._run_active_response(validated_payload, integration_row)
+
         client = self._client(integration_row)
         if action_name == "get_agents":
             payload = _as(WazuhGetAgentsRequest, validated_payload)
@@ -331,18 +380,21 @@ class WazuhConnector:
             items = _wazuh_affected_items(result)
             return {"agent": items[0] if items else None, "raw": result}
 
-        if action_name == "run_active_response":
-            payload = _as(WazuhRunActiveResponseRequest, validated_payload)
-            _enforce_active_response_allowlist(payload.command)
-            result = client.run_active_response(
-                command=payload.command,
-                agent_ids=payload.agent_ids,
-                arguments=payload.arguments,
-                alert=payload.alert,
-            )
-            return _wazuh_collection_result("affected_agents", result)
-
         raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}")
+
+    def _run_active_response(self, validated_payload: BaseModel, integration_row: Any) -> dict[str, Any]:
+        dry_run = preflight_active_response(validated_payload)
+        if dry_run is not None:
+            return dry_run
+        payload = _as(WazuhRunActiveResponseRequest, validated_payload)
+        client = self._client(integration_row)
+        result = client.run_active_response(
+            command=payload.command,
+            agent_ids=payload.agent_ids,
+            arguments=payload.arguments,
+            alert=payload.alert,
+        )
+        return _wazuh_collection_result("affected_agents", result)
 
     def test_connection(self, integration_row: Any) -> dict[str, Any]:
         info = self._client(integration_row).api_info()

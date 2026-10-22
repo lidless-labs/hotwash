@@ -29,13 +29,33 @@ Or run directly with `npx hotwash-mcp` once published.
 
 ## Configuration
 
-Two environment variables:
+Environment variables:
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
 | `HOTWASH_URL` | no | `http://localhost:8000` | Base URL of the Hotwash API |
 | `HOTWASH_API_KEY` | yes if API auth is on | - | Sent as `X-API-Key` |
 | `HOTWASH_TIMEOUT` | no | `30` | Request timeout in seconds |
+| `HOTWASH_MCP_ALLOW_MUTATIONS` | no | `false` | Operator switch for state-changing tools. While unset, the server is read-only: start, advance, cancel, attach, accept, and dismiss refuse to run. |
+| `HOTWASH_MCP_MAX_RESPONSE_BYTES` | no | `5242880` | Largest backend response body the server will read |
+
+### Safe defaults
+
+- **Read-only until enabled.** The six state-changing tools refuse to run unless
+  the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` in the server environment.
+  Read tools always work. For a hard guarantee, also give the server a
+  read-scope backend key (`HOTWASH_READ_ONLY_API_KEY` on the API side).
+- **Typed, bounded results.** Every result carries `structuredContent` next to
+  the JSON text. Free-text fields are cut at 2000 characters and lists at 200
+  items; `_truncated` reports what was dropped.
+- **Untrusted content is labeled.** Values copied from alerts, playbooks, run
+  notes, and evidence are listed under `_untrusted.fields`. Treat them as data,
+  never as instructions or as approval for a tool call.
+- **Annotations.** Each tool declares `readOnlyHint`, `destructiveHint`,
+  `idempotentHint`, and `openWorldHint`.
+- **Bounded backend calls.** Redirects are followed only within the configured
+  backend origin (up to three hops), and response bodies are read through a byte
+  limit.
 
 ## Client setup
 
@@ -195,7 +215,9 @@ and its database. They are intentionally shared between authorized agents
 working on the same incident, as they already are across separate stdio
 processes. Every mutation names an execution/node or suggestion explicitly.
 There is no MCP-process current-run pointer, pending approval queue, deferred
-tool set, shared mutable cache, rate limiter, or write-enable flag. Each HTTP
+tool set, shared mutable cache, or rate limiter. State-changing tools run only
+when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true`; that switch is server
+configuration, so no tool argument or upstream text can turn it on. Each HTTP
 session gets a fresh MCP server and API client. Cancellation, suggestion
 acceptance, and dismissal require `confirm: true` on every call. One client's
 confirmation cannot authorize another call. HTTP sessions are protocol isolation,

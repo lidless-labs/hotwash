@@ -181,7 +181,7 @@ def test_wazuh_ingested_export_uses_stored_fingerprint(client, run, temp_db):
 
 def test_abandoned_export(client, run):
     rid, headers, _ = run
-    assert client.patch(f'/api/executions/{rid}', headers=headers, json={'status': 'abandoned'}).status_code == 200
+    assert client.patch(f'/api/executions/{rid}', headers=headers, json={'status': 'abandoned', 'confirm': True}).status_code == 200
     document = export(client, run)
     assert document['records'] == []
     assert document['closeout']['status'] == 'closed'

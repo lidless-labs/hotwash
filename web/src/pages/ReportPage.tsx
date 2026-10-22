@@ -5,7 +5,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useHashRouter } from '../router';
-import { API_BASE_URL, API_KEY } from '../api/client';
+import { API_BASE_URL } from '../api/client';
+import { authHeaders } from '../api/auth';
 import { parseApiDate } from '../lib/time';
 
 interface ReportData {
@@ -63,7 +64,7 @@ const ReportPage: React.FC<ReportPageProps> = ({ executionId }) => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/executions/${executionId}/report`, {
           headers: {
-            ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+            ...authHeaders(),
           },
         });
         if (!res.ok) throw new Error('Failed to fetch report');
@@ -80,7 +81,7 @@ const ReportPage: React.FC<ReportPageProps> = ({ executionId }) => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/executions/${executionId}/report/markdown`, {
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
       });
       if (!res.ok) throw new Error();
