@@ -72,11 +72,16 @@ def _create_execution(temp_db, *, node_id: str = "node_1") -> int:
     return execution_id
 
 
-def test_execution_websocket_requires_valid_api_key(client, temp_db, api_key):
+def test_execution_websocket_requires_valid_ticket_or_header(client, temp_db, api_key):
     execution_id = _create_execution(temp_db)
+    minted = client.post(
+        f"/api/executions/{execution_id}/live-ticket", headers={"X-API-Key": api_key}
+    )
+    assert minted.status_code == 200
+    ticket = minted.json()["ticket"]
 
     with client.websocket_connect(
-        f"/api/executions/{execution_id}/live?api_key={api_key}"
+        f"/api/executions/{execution_id}/live?ticket={ticket}"
     ) as websocket:
         websocket.send_text("ping")
 
@@ -87,10 +92,21 @@ def test_execution_websocket_requires_valid_api_key(client, temp_db, api_key):
 
     with pytest.raises(WebSocketDisconnect) as invalid:
         with client.websocket_connect(
-            f"/api/executions/{execution_id}/live?api_key=wrong"
+            f"/api/executions/{execution_id}/live?ticket=wrong"
         ):
             pass
     assert invalid.value.code == 4401
+
+
+def test_execution_websocket_ignores_api_key_in_query_string(client, temp_db, api_key):
+    execution_id = _create_execution(temp_db)
+
+    with pytest.raises(WebSocketDisconnect) as rejected:
+        with client.websocket_connect(
+            f"/api/executions/{execution_id}/live?api_key={api_key}"
+        ):
+            pass
+    assert rejected.value.code == 4401
 
 
 @pytest.mark.parametrize("query_key", [None, "valid", "wrong", ""])

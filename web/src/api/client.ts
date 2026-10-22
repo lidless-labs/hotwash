@@ -5,6 +5,7 @@
  */
 
 import { PlaybookGraph } from '../types';
+import { authHeaders } from './auth';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 
@@ -98,15 +99,13 @@ async function parseJsonSafe(response: Response): Promise<any | null> {
   }
 }
 
-export const API_KEY: string | undefined = import.meta.env.VITE_HOTWASH_API_KEY;
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
   const response = await fetch(url, {
     ...options,
     headers: {
       ...jsonHeaders,
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+      ...authHeaders(),
       ...(options.headers || {}),
     },
   });
@@ -206,7 +205,7 @@ async function requestText(path: string, options: RequestInit = {}): Promise<str
   const response = await fetch(url, {
     ...options,
     headers: {
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+      ...authHeaders(),
       ...(options.headers || {}),
     },
   });
@@ -257,7 +256,7 @@ export async function bulkImportPlaybooks(files: File[]): Promise<BulkImportResu
     method: 'POST',
     body: formData,
     headers: {
-      ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+      ...authHeaders(),
     },
   });
 
@@ -385,7 +384,7 @@ export function acceptSuggestion(
   id: number | string
 ): Promise<ApiSuggestionAcceptResponse> {
   return request<ApiSuggestionAcceptResponse>(
-    `/api/ingest/suggestions/${encodeURIComponent(String(id))}/accept`,
+    `/api/ingest/suggestions/${encodeURIComponent(String(id))}/accept?confirm=true`,
     { method: 'POST' }
   );
 }
@@ -400,7 +399,7 @@ export function dismissSuggestion(
     init.body = JSON.stringify({ reason: trimmed });
   }
   return request<ApiSuggestionSummary>(
-    `/api/ingest/suggestions/${encodeURIComponent(String(id))}/dismiss`,
+    `/api/ingest/suggestions/${encodeURIComponent(String(id))}/dismiss?confirm=true`,
     init
   );
 }

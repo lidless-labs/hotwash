@@ -1,37 +1,41 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { HotwashClient } from "../client.js";
-import { fail, ok, refuseUnconfirmed } from "./_util.js";
+import { fail, guardMutation, mutatingTool, ok, READ_ONLY_TOOL, refuseUnconfirmed, type ToolPolicy } from "./_util.js";
 
 const SUGGESTION_STATES = ["pending", "accepted", "dismissed"] as const;
 
-export function registerSuggestionTools(server: McpServer, client: HotwashClient): void {
+export function registerSuggestionTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
   server.tool(
     "hotwash_list_suggestions",
     "List ingest suggestions queued from `mode=suggest` Wazuh mappings. Returns the queue an analyst can review and act on. Defaults to state='pending' (the actionable queue). Filter by mapping_id to inspect a specific integration. Pair with hotwash_accept_suggestion to promote a row into a real execution.",
     {
       state: z.enum(SUGGESTION_STATES).optional().describe("Filter by lifecycle state. Defaults to 'pending' on the server."),
       mapping_id: z.number().int().positive().optional().describe("Filter to a single mapping (e.g. one Wazuh integration)."),
-      limit: z.number().int().positive().max(500).optional().describe("Max rows to return. Server caps at 500; default is 100."),
+      limit: z.number().int().positive().max(200).optional().describe("Max rows to return. Capped at 200; default is 100."),
     },
+    READ_ONLY_TOOL,
     async ({ state, mapping_id, limit }) => {
       try {
         const rows = await client.listSuggestions({ state, mapping_id, limit });
-        return ok({
-          count: rows.length,
-          suggestions: rows.map((row) => ({
-            id: row.id,
-            state: row.state,
-            mapping_id: row.mapping_id,
-            playbook_id: row.playbook_id,
-            rule_id: row.rule_id ?? null,
-            agent_name: row.agent_name ?? null,
-            description: row.description ?? null,
-            accepted_execution_id: row.accepted_execution_id ?? null,
-            created_at: row.created_at,
-            resolved_at: row.resolved_at ?? null,
-          })),
-        });
+        return ok(
+          {
+            count: rows.length,
+            suggestions: rows.map((row) => ({
+              id: row.id,
+              state: row.state,
+              mapping_id: row.mapping_id,
+              playbook_id: row.playbook_id,
+              rule_id: row.rule_id ?? null,
+              agent_name: row.agent_name ?? null,
+              description: row.description ?? null,
+              accepted_execution_id: row.accepted_execution_id ?? null,
+              created_at: row.created_at,
+              resolved_at: row.resolved_at ?? null,
+            })),
+          },
+          ["suggestions[].rule_id", "suggestions[].agent_name", "suggestions[].description"],
+        );
       } catch (error) {
         return fail(error);
       }
@@ -45,21 +49,27 @@ export function registerSuggestionTools(server: McpServer, client: HotwashClient
       suggestion_id: z.number().int().positive(),
       confirm: z.literal(true).describe("Must be true. Acknowledges a new execution will be created from this suggestion."),
     },
+    mutatingTool({ destructive: true, idempotent: true }),
     async ({ suggestion_id, confirm }) => {
+      const blocked = guardMutation(policy, "accept this suggestion");
+      if (blocked) return blocked;
       if (!confirm) return refuseUnconfirmed("accept this suggestion");
       try {
         const response = await client.acceptSuggestion(suggestion_id);
-        return ok({
-          execution_id: response.execution.id,
-          status: response.execution.status,
-          incident_title: response.execution.incident_title,
-          playbook_id: response.execution.playbook_id,
-          playbook_title: response.execution.playbook_title ?? null,
-          steps_total: response.execution.steps_total,
-          steps_completed: response.execution.steps_completed,
-          started_at: response.execution.started_at,
-          already_accepted: response.already_accepted,
-        });
+        return ok(
+          {
+            execution_id: response.execution.id,
+            status: response.execution.status,
+            incident_title: response.execution.incident_title,
+            playbook_id: response.execution.playbook_id,
+            playbook_title: response.execution.playbook_title ?? null,
+            steps_total: response.execution.steps_total,
+            steps_completed: response.execution.steps_completed,
+            started_at: response.execution.started_at,
+            already_accepted: response.already_accepted,
+          },
+          ["incident_title", "playbook_title"],
+        );
       } catch (error) {
         return fail(error);
       }
@@ -80,22 +90,28 @@ export function registerSuggestionTools(server: McpServer, client: HotwashClient
         .literal(true)
         .describe("Must be true. Acknowledges the suggestion will be dismissed and a cooldown anchor written for its fingerprint."),
     },
+    mutatingTool({ destructive: true, idempotent: false }),
     async ({ suggestion_id, reason, confirm }) => {
+      const blocked = guardMutation(policy, "dismiss this suggestion");
+      if (blocked) return blocked;
       if (!confirm) return refuseUnconfirmed("dismiss this suggestion");
       try {
         const row = await client.dismissSuggestion(suggestion_id, reason);
-        return ok({
-          id: row.id,
-          state: row.state,
-          mapping_id: row.mapping_id,
-          playbook_id: row.playbook_id,
-          rule_id: row.rule_id ?? null,
-          agent_name: row.agent_name ?? null,
-          description: row.description ?? null,
-          accepted_execution_id: row.accepted_execution_id ?? null,
-          created_at: row.created_at,
-          resolved_at: row.resolved_at ?? null,
-        });
+        return ok(
+          {
+            id: row.id,
+            state: row.state,
+            mapping_id: row.mapping_id,
+            playbook_id: row.playbook_id,
+            rule_id: row.rule_id ?? null,
+            agent_name: row.agent_name ?? null,
+            description: row.description ?? null,
+            accepted_execution_id: row.accepted_execution_id ?? null,
+            created_at: row.created_at,
+            resolved_at: row.resolved_at ?? null,
+          },
+          ["rule_id", "agent_name", "description"],
+        );
       } catch (error) {
         return fail(error);
       }

@@ -26,6 +26,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from api.auth import get_api_key
+from api.confirmation import require_confirmation
 from api.crypto import encrypt_secret
 from api.database import get_db
 from api.orm_models import IngestSuggestion, Playbook, WazuhMapping
@@ -434,7 +435,12 @@ def get_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
     "/ingest/suggestions/{suggestion_id}/accept",
     response_model=SuggestionAcceptResponse,
 )
-def accept_suggestion_route(suggestion_id: int, db: Session = Depends(get_db)):
+def accept_suggestion_route(
+    suggestion_id: int,
+    confirm: bool = Query(False, description="Must be true to create an execution from the suggestion"),
+    db: Session = Depends(get_db),
+):
+    require_confirmation(confirm, "accept this suggestion")
     try:
         execution, already_accepted = accept_suggestion(db, suggestion_id)
     except LookupError:
@@ -454,8 +460,10 @@ def accept_suggestion_route(suggestion_id: int, db: Session = Depends(get_db)):
 def dismiss_suggestion_route(
     suggestion_id: int,
     payload: Optional[SuggestionDismiss] = None,
+    confirm: bool = Query(False, description="Must be true to dismiss the suggestion"),
     db: Session = Depends(get_db),
 ):
+    require_confirmation(confirm, "dismiss this suggestion")
     reason = payload.reason if payload else None
     try:
         suggestion = dismiss_suggestion(db, suggestion_id, reason)

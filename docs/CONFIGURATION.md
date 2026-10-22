@@ -18,7 +18,7 @@ VITE_THEME_DEFAULT=soc
 |----------|-------------|---------|
 | `VITE_APP_PORT` | Frontend port | 5177 |
 | `VITE_API_URL` | Backend API URL (read by `web/src/api/client.ts`) | http://localhost:8000 |
-| `VITE_HOTWASH_API_KEY` | API key sent as `X-API-Key` on backend requests. Must match the backend's `HOTWASH_API_KEY` when `VITE_ENABLE_BACKEND=true`. | (unset) |
+| `VITE_HOTWASH_API_KEY` | Local development convenience only. Read by `npm run dev` and ignored by production builds, so it is never bundled. In a deployed UI, enter the key in the settings panel (gear, bottom left); it is kept for the browser session. | (unset) |
 | `VITE_STORAGE_KEY` | localStorage key for playbooks | playbook-forge-v1 |
 | `VITE_ENABLE_BACKEND` | Enable backend features (storage, sync) | false |
 | `VITE_THEME_DEFAULT` | Default theme on first load | soc |
@@ -45,7 +45,7 @@ cd web
 VITE_ENABLE_BACKEND=true \
 VITE_API_URL=http://localhost:8000 \
 VITE_HOTWASH_API_KEY=choose-a-strong-key \
-npm run dev
+npm run dev   # dev only; a built UI takes the key from the settings panel
 
 # Backend (in another terminal, from the repo root)
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -76,7 +76,10 @@ HOTWASH_CORS_ORIGINS=http://localhost:5177
 | `HOTWASH_WAZUH_SEED_SECRET` | HMAC secret for the seeded Wazuh ingest mapping. | (random per seed) |
 | `HOTWASH_PLAYBOOK_SEED_DIR` | Directory of markdown playbooks inserted on first run when the database is empty. Paths may be absolute or relative; `~` is expanded. | `api/seed_data/playbooks` (shipped with the app) |
 | `HOTWASH_PRIVATE_HOST_ALLOWLIST` | CIDRs exempt from the outbound SSRF block (see below). | (empty) |
-| `HOTWASH_WAZUH_AR_COMMANDS` | Comma-separated allow-list of Wazuh active-response commands. When set, only these commands can be dispatched; when unset, any command the manager defines is allowed (with a warning). | (empty) |
+| `HOTWASH_WAZUH_AR_COMMANDS` | Comma-separated allow-list of Wazuh active-response commands. Active response is disabled until this names at least one command; only listed commands can be dispatched. | (empty, disabled) |
+| `HOTWASH_READ_ONLY_API_KEY` | Optional second key with read scope. It can call safe methods (`GET`, `HEAD`, `OPTIONS`) and open live sockets, and every other request is refused with `403`. Must differ from `HOTWASH_API_KEY`. | (unset) |
+| `HOTWASH_READ_ONLY` | When `true`, every key is limited to read scope, including `HOTWASH_API_KEY`. The signed Wazuh ingest webhook is unaffected. | `false` |
+| `HOTWASH_MAX_UPSTREAM_BYTES` | Largest response body accepted from TheHive, Wazuh, or a webhook target. Larger bodies are cut off and reported as an upstream error. | 5242880 |
 
 ### Database Setup
 
@@ -136,11 +139,13 @@ POST /api/integrations/wazuh/actions/run_active_response
 `command` and a non-empty digit-only `agent_ids` list, with optional
 `arguments` and `alert`.
 
-`run_active_response` triggers response actions on endpoints, so restrict which
-commands it can dispatch with `HOTWASH_WAZUH_AR_COMMANDS` (comma-separated). When
-set, a command outside the list is rejected with `422`; when unset, any command
-the manager defines in `ossec.conf` can be triggered and the dispatch logs a
-warning. A partial failure (some agents in `failed_items`) is surfaced in the
+`run_active_response` triggers response actions on endpoints, so it is closed by
+default. Name the permitted commands in `HOTWASH_WAZUH_AR_COMMANDS`
+(comma-separated). While the variable is unset or empty the action returns
+`403`, and a command outside the list returns `422`. Every request must also
+carry `"confirm": true`. Add `"dry_run": true` to validate the request and see
+what would be sent without contacting Wazuh (Wazuh itself has no dry-run mode,
+so Hotwash stops before the upstream call). A partial failure (some agents in `failed_items`) is surfaced in the
 action result as `failed`/`total_failed` rather than reported as success.
 
 ### `HOTWASH_LIVE_WAZUH_URL` / `HOTWASH_LIVE_WAZUH_USERNAME` / `HOTWASH_LIVE_WAZUH_PASSWORD`
@@ -448,9 +453,9 @@ ports). If the frontend is served from another origin, set:
 HOTWASH_CORS_ORIGINS=https://hotwash.example.com .venv/bin/uvicorn api.main:app --port 8000
 ```
 
-Also confirm the frontend has `VITE_ENABLE_BACKEND=true`, `VITE_API_URL`
-pointing at the backend, and a matching `VITE_HOTWASH_API_KEY` for the
-backend's `HOTWASH_API_KEY`.
+Also confirm the frontend has `VITE_ENABLE_BACKEND=true` and `VITE_API_URL`
+pointing at the backend, and that the backend's `HOTWASH_API_KEY` has been
+entered in the UI settings panel for this browser session.
 
 ### Canvas Freezing on Large Playbooks
 

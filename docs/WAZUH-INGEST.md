@@ -120,7 +120,7 @@ first or no mapping will match.
 
   ```bash
   curl -X POST -H "X-API-Key: $HOTWASH_API_KEY" \
-    https://hotwash.example/api/ingest/suggestions/42/accept
+    "https://hotwash.example/api/ingest/suggestions/42/accept?confirm=true"
   # Returns: {"execution_id": 17, "already_accepted": false}
   # Re-accept returns the same execution_id with "already_accepted": true
   ```
@@ -131,8 +131,11 @@ first or no mapping will match.
   curl -X POST -H "X-API-Key: $HOTWASH_API_KEY" \
     -H "Content-Type: application/json" \
     -d '{"reason": "noise - known scanner activity"}' \
-    https://hotwash.example/api/ingest/suggestions/42/dismiss
+    "https://hotwash.example/api/ingest/suggestions/42/dismiss?confirm=true"
   ```
+
+  Both state changes need `confirm=true` on the request itself. Without it
+  the API answers `422` and the suggestion is untouched.
 
 - `off`: logs the receipt only. Returns `200` with `status: ignored`.
 
@@ -282,16 +285,12 @@ creation and the moment a reviewer opens the detail page, the API returns
 was removed" state rather than a generic error, and Accept and Dismiss are
 disabled because there is nothing to act on.
 
-**Auth.** The web UI sends `X-API-Key` from the build-time env var
-`VITE_HOTWASH_API_KEY` on every request to a key-gated endpoint (the entire
-`/api/ingest/*` surface, including suggestions and mappings). Because Vite
-inlines `import.meta.env` at build time, the key must be set when the
-frontend bundle is built; a missing or wrong value at build time produces a
-bundle that cannot authenticate at runtime, no matter what the deployment
-config says. This is the smallest-blast-radius pick that lets the queue work
-today, on the assumption that the bundle is served from the same trust
-boundary as the API. A broader auth design (per-user sessions, browser-side
-login, or a runtime-injected token) is a follow-up.
+**Auth.** The web UI sends `X-API-Key` on every request to a key-gated
+endpoint (the entire `/api/ingest/*` surface, including suggestions and
+mappings). The key is entered in the UI settings panel and held for the browser
+session; it is not part of the built bundle. The live execution socket uses a
+short-lived ticket instead of the key (`POST /api/executions/:id/live-ticket`).
+Per-user sessions and approver identity are still a follow-up.
 
 ## Known limitations
 

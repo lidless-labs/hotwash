@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { HotwashClient } from "../client.js";
-import { fail, ok, refuseUnconfirmed } from "./_util.js";
+import { fail, guardMutation, mutatingTool, ok, READ_ONLY_TOOL, refuseUnconfirmed, type ToolPolicy } from "./_util.js";
 
 const STEP_STATUSES = ["not_started", "in_progress", "completed", "skipped", "blocked"] as const;
 
-export function registerRunTools(server: McpServer, client: HotwashClient): void {
+export function registerRunTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
   server.tool(
     "hotwash_start_run",
     "Start a new playbook execution for an incident. The playbook's nodes are cloned into per-step state (not_started). Returns the new execution id and step counters; pair with query_run to inspect the steps.",
@@ -16,19 +16,25 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
       started_by: z.string().optional().describe("Analyst or system identifier kicking off the run."),
       context: z.record(z.string(), z.any()).optional().describe("Free-form context attached to the run, e.g. a Wazuh alert payload, IOC list, or hostname."),
     },
+    mutatingTool({ destructive: false, idempotent: false }),
     async (args) => {
+      const blocked = guardMutation(policy, "start a run");
+      if (blocked) return blocked;
       try {
         const summary = await client.startRun(args);
-        return ok({
-          execution_id: summary.id,
-          status: summary.status,
-          incident_title: summary.incident_title,
-          playbook_id: summary.playbook_id,
-          playbook_title: summary.playbook_title ?? null,
-          steps_total: summary.steps_total,
-          steps_completed: summary.steps_completed,
-          started_at: summary.started_at,
-        });
+        return ok(
+          {
+            execution_id: summary.id,
+            status: summary.status,
+            incident_title: summary.incident_title,
+            playbook_id: summary.playbook_id,
+            playbook_title: summary.playbook_title ?? null,
+            steps_total: summary.steps_total,
+            steps_completed: summary.steps_completed,
+            started_at: summary.started_at,
+          },
+          ["playbook_title"],
+        );
       } catch (error) {
         return fail(error);
       }
@@ -42,6 +48,7 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
       execution_id: z.number().int().positive(),
       include_timeline: z.boolean().optional().describe("Also return the chronological event log (returned in reverse-chronological order, newest first)."),
     },
+    READ_ONLY_TOOL,
     async ({ execution_id, include_timeline }) => {
       try {
         const detail = await client.getRun(execution_id);
@@ -53,7 +60,20 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
         if (include_timeline) {
           payload.timeline = await client.getTimeline(execution_id);
         }
-        return ok(payload);
+        return ok(payload, [
+          "execution.incident_title",
+          "execution.incident_id",
+          "execution.playbook_title",
+          "steps[].node_label",
+          "steps[].phase",
+          "steps[].assignee",
+          "steps[].notes",
+          "steps[].decision_options",
+          "steps[].evidence",
+          "playbook_title",
+          "timeline[].description",
+          "timeline[].actor",
+        ]);
       } catch (error) {
         return fail(error);
       }
@@ -71,7 +91,10 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
       note: z.string().optional().describe("Append a free-form note to the step's note list."),
       decision_taken: z.string().optional().describe("For decision nodes, which option was chosen (must be one of decision_options)."),
     },
+    mutatingTool({ destructive: true, idempotent: false }),
     async ({ execution_id, node_id, status, assignee, note, decision_taken }) => {
+      const blocked = guardMutation(policy, "update this step");
+      if (blocked) return blocked;
       try {
         const detail = await client.advanceStep(execution_id, node_id, {
           status,
@@ -80,10 +103,22 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
           decision_taken,
         });
         const updated = detail.steps.find((s) => s.node_id === node_id);
-        return ok({
-          execution: detail.execution,
-          step: updated ?? null,
-        });
+        return ok(
+          {
+            execution: detail.execution,
+            step: updated ?? null,
+          },
+          [
+            "execution.incident_title",
+            "execution.incident_id",
+            "execution.playbook_title",
+            "step.node_label",
+            "step.assignee",
+            "step.notes",
+            "step.decision_options",
+            "step.evidence",
+          ],
+        );
       } catch (error) {
         return fail(error);
       }
@@ -98,13 +133,16 @@ export function registerRunTools(server: McpServer, client: HotwashClient): void
       reason: z.string().optional().describe("Free-form reason recorded as an execution note."),
       confirm: z.literal(true).describe("Must be true. Acknowledges the run will be marked abandoned."),
     },
+    mutatingTool({ destructive: true, idempotent: true }),
     async ({ execution_id, reason, confirm }) => {
+      const blocked = guardMutation(policy, "abandon this execution");
+      if (blocked) return blocked;
       if (!confirm) return refuseUnconfirmed("abandon this execution");
       try {
         if (reason) {
           await client.patchExecution(execution_id, { notes: reason });
         }
-        const summary = await client.patchExecution(execution_id, { status: "abandoned" });
+        const summary = await client.patchExecution(execution_id, { status: "abandoned", confirm: true });
         return ok({
           execution_id: summary.id,
           status: summary.status,

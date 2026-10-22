@@ -5,6 +5,30 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 
 ## [Unreleased]
 
+### Changed
+- Wazuh `run_active_response` is closed by default: it needs a nonempty
+  `HOTWASH_WAZUH_AR_COMMANDS` allow-list (`403` otherwise), `"confirm": true`
+  on every request, and supports `"dry_run": true`.
+- The API enforces confirmation itself: accepting or dismissing a suggestion
+  and deleting an execution need `confirm=true`, and abandoning an execution
+  needs `"confirm": true` in the body. The web UI and MCP server send it.
+- `HOTWASH_READ_ONLY_API_KEY` adds a read-scope key and `HOTWASH_READ_ONLY=true`
+  limits every key to read scope. Scope is enforced for all key-gated routes.
+- Live execution sockets authenticate with a short-lived ticket from
+  `POST /api/executions/:id/live-ticket`. The `api_key` query parameter is no
+  longer accepted (the `X-API-Key` header still works for non-browser clients).
+- The web UI no longer reads `VITE_HOTWASH_API_KEY` in production builds. The
+  key is entered in the settings panel and kept for the browser session.
+- Upstream responses from TheHive, Wazuh, and webhook targets are read through
+  a byte limit (`HOTWASH_MAX_UPSTREAM_BYTES`, default 5 MiB).
+- `hotwash-mcp`: state-changing tools require `HOTWASH_MCP_ALLOW_MUTATIONS=true`
+  (read-only by default); results include `structuredContent`, are bounded, and
+  label upstream-written fields as untrusted; tools declare all four annotation
+  hints; the backend client follows redirects only within its own origin and
+  reads responses through a byte limit (`HOTWASH_MCP_MAX_RESPONSE_BYTES`).
+  `hotwash_list_playbooks` now returns `{count, playbooks}` instead of a bare
+  array, and `hotwash_list_suggestions` caps `limit` at 200.
+
 ### Added
 - TheHive `run_analyzer` SOAR action: launches a Cortex analyzer on an
   observable through TheHive's Cortex link

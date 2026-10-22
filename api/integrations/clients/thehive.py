@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 import requests
 
+from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_bounded
 from api.security import PinnedURL, apply_host_pinning
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,15 @@ class TheHiveClient:
                 # Redirects would re-resolve attacker-controlled hostnames and
                 # bypass the SSRF pin; the TheHive v1 API never redirects.
                 allow_redirects=False,
+                stream=True,
             )
+            read_bounded(resp)
+        except UpstreamResponseTooLarge as exc:
+            raise TheHiveError(
+                "TheHive response exceeded the size limit",
+                status_code=None,
+                details={"upstream": "response_too_large", "limit_bytes": exc.limit},
+            ) from exc
         except requests.RequestException as exc:
             raise TheHiveError(
                 f"TheHive request failed: {exc}",

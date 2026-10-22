@@ -152,6 +152,8 @@ def test_wazuh_client_requests_go_to_pinned_ip():
                     "ok": True,
                     "text": "jwt-token",
                     "json": lambda self: {},
+                    "iter_content": lambda self, chunk_size=1: iter(()),
+                    "close": lambda self: None,
                 },
             )(),
             type(
@@ -162,6 +164,8 @@ def test_wazuh_client_requests_go_to_pinned_ip():
                     "ok": True,
                     "text": '{"title": "Wazuh API"}',
                     "json": lambda self: {"title": "Wazuh API"},
+                    "iter_content": lambda self, chunk_size=1: iter(()),
+                    "close": lambda self: None,
                 },
             )(),
         ]

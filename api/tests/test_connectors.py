@@ -133,6 +133,7 @@ def test_http_webhook_posts_json_to_pinned_url(temp_db):
         timeout=10.0,
         verify=False,
         allow_redirects=False,
+        stream=True,
     )
 
 
@@ -270,7 +271,7 @@ def test_wazuh_active_response_requires_digit_agent_ids():
     from api.integrations.connectors import WazuhRunActiveResponseRequest
 
     with pytest.raises(ValueError):
-        WazuhRunActiveResponseRequest(command="restart-wazuh0", agent_ids=["001", "bad"])
+        WazuhRunActiveResponseRequest(command="restart-wazuh0", agent_ids=["001", "bad"], confirm=True)
 
 
 @pytest.mark.parametrize(
@@ -287,12 +288,13 @@ def test_wazuh_active_response_bounds_destructive_payload(payload):
     from api.integrations.connectors import WazuhRunActiveResponseRequest
 
     with pytest.raises(ValueError):
-        WazuhRunActiveResponseRequest(command="restart-wazuh0", **payload)
+        WazuhRunActiveResponseRequest(command="restart-wazuh0", confirm=True, **payload)
 
 
-def test_wazuh_active_response_action_returns_summary(temp_db):
+def test_wazuh_active_response_action_returns_summary(temp_db, monkeypatch):
     from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
 
+    monkeypatch.setenv("HOTWASH_WAZUH_AR_COMMANDS", "restart-wazuh0")
     integration = _wazuh_integration(temp_db)
     with patch(
         "api.integrations.connectors.resolve_and_pin_integration_url",
@@ -308,6 +310,7 @@ def test_wazuh_active_response_action_returns_summary(temp_db):
                 agent_ids=["001"],
                 arguments=["arg1"],
                 alert={"rule": {"id": "5710"}},
+                confirm=True,
             ),
             integration,
         )
@@ -366,7 +369,7 @@ def test_wazuh_active_response_rejects_command_not_in_allowlist(temp_db, monkeyp
         with pytest.raises(HTTPException) as exc:
             get_connector("wazuh").execute(
                 "run_active_response",
-                WazuhRunActiveResponseRequest(command="rm-everything", agent_ids=["001"]),
+                WazuhRunActiveResponseRequest(command="rm-everything", agent_ids=["001"], confirm=True),
                 integration,
             )
 
@@ -388,7 +391,7 @@ def test_wazuh_active_response_allows_command_in_allowlist(temp_db, monkeypatch)
         }
         result = get_connector("wazuh").execute(
             "run_active_response",
-            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"]),
+            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"], confirm=True),
             integration,
         )
 
@@ -399,7 +402,7 @@ def test_wazuh_active_response_allows_command_in_allowlist(temp_db, monkeypatch)
 def test_wazuh_active_response_surfaces_failed_items(temp_db, monkeypatch):
     from api.integrations.connectors import WazuhRunActiveResponseRequest, get_connector
 
-    monkeypatch.delenv("HOTWASH_WAZUH_AR_COMMANDS", raising=False)
+    monkeypatch.setenv("HOTWASH_WAZUH_AR_COMMANDS", "firewall-drop")
     integration = _wazuh_integration(temp_db)
     with patch(
         "api.integrations.connectors.resolve_and_pin_integration_url",
@@ -415,7 +418,7 @@ def test_wazuh_active_response_surfaces_failed_items(temp_db, monkeypatch):
         }
         result = get_connector("wazuh").execute(
             "run_active_response",
-            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"]),
+            WazuhRunActiveResponseRequest(command="firewall-drop", agent_ids=["001"], confirm=True),
             integration,
         )
 

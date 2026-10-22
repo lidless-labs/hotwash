@@ -5,7 +5,8 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useHashRouter } from '../router';
-import { API_BASE_URL, API_KEY } from '../api/client';
+import { API_BASE_URL } from '../api/client';
+import { authHeaders } from '../api/auth';
 import { useExecutionSocket } from '../hooks/useExecutionSocket';
 import { parseApiDate, relativeTime } from '../lib/time';
 
@@ -107,7 +108,7 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
     try {
       const res = await fetch(`${API_BASE_URL}/api/executions/${executionId}`, {
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
       });
       if (!res.ok) throw new Error('Failed to fetch');
@@ -166,7 +167,7 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -180,7 +181,7 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -203,7 +204,7 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
       await fetch(`${API_BASE_URL}/api/executions/${executionId}/steps/${selectedStepId}/evidence`, {
         method: 'POST',
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
         body: formData,
       });
@@ -217,7 +218,7 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
     try {
       const res = await fetch(`${API_BASE_URL}/api/executions/${executionId}/timeline`, {
         headers: {
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...authHeaders(),
         },
       });
       if (res.ok) {
@@ -231,7 +232,8 @@ const ExecutionViewPage: React.FC<ExecutionViewPageProps> = ({ executionId }) =>
   const handleConfirmAction = (action: string) => {
     if (!confirm(`Are you sure you want to ${action} this execution?`)) return;
     const statusMap: Record<string, string> = { pause: 'paused', complete: 'completed', abandon: 'abandoned' };
-    updateExecution({ status: statusMap[action] });
+    // The browser confirm above is the operator's confirmation; the API requires it explicitly.
+    updateExecution({ status: statusMap[action], ...(action === 'abandon' ? { confirm: true } : {}) });
   };
 
   if (loading) {

@@ -141,6 +141,7 @@ for (const chunked of [false, true]) {
 }
 test("separate sessions target explicit backend runs and cannot borrow confirmation", async () => {
   configure();
+  process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
   const requests: string[] = [];
   const backend = createServer((req, res) => {
     requests.push(`${req.method} ${req.url}`);
@@ -169,7 +170,7 @@ test("separate sessions target explicit backend runs and cannot borrow confirmat
     assert.equal((await b.client.callTool({ name: "hotwash_attach_artifact", arguments: {
       execution_id: 99, node_id: "triage", filename: "/etc/passwd", source_ref: "file:///etc/passwd",
     } })).isError, true);
-    assert.deepEqual(requests, ["POST /api/ingest/suggestions/7/accept",
+    assert.deepEqual(requests, ["POST /api/ingest/suggestions/7/accept?confirm=true",
       "PATCH /api/executions/42/steps/collect", "GET /api/executions/42",
       "PATCH /api/executions/99/steps/triage"]);
   } finally {

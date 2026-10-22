@@ -2,9 +2,9 @@ import { Buffer } from "node:buffer";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { HotwashClient } from "../client.js";
-import { fail, ok } from "./_util.js";
+import { fail, guardMutation, mutatingTool, ok, type ToolPolicy } from "./_util.js";
 
-export function registerArtifactTools(server: McpServer, client: HotwashClient): void {
+export function registerArtifactTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
   server.tool(
     "hotwash_attach_artifact",
     "Attach a text or base64-encoded binary artifact (e.g. a log snippet, screenshot, hash list) to a step in a running execution. Either text or base64 must be provided.",
@@ -18,7 +18,10 @@ export function registerArtifactTools(server: McpServer, client: HotwashClient):
       text: z.string().optional().describe("UTF-8 text content. Use for log snippets, JSON dumps, etc."),
       base64: z.string().optional().describe("Base64-encoded binary content. Use for images or non-text artifacts."),
     },
+    mutatingTool({ destructive: false, idempotent: false }),
     async ({ execution_id, node_id, filename, text, base64, source_tool, source_ref, observed_at }) => {
+      const blocked = guardMutation(policy, "attach this artifact");
+      if (blocked) return blocked;
       if (!text && !base64) {
         return fail(new Error("Provide either 'text' or 'base64' content for the artifact."));
       }
@@ -34,10 +37,13 @@ export function registerArtifactTools(server: McpServer, client: HotwashClient):
           new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
           { source_tool, source_ref, observed_at },
         );
-        return ok({
-          node_id: step.node_id,
-          evidence: step.evidence,
-        });
+        return ok(
+          {
+            node_id: step.node_id,
+            evidence: step.evidence,
+          },
+          ["evidence"],
+        );
       } catch (error) {
         return fail(error);
       }

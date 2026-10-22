@@ -4,7 +4,8 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { API_BASE_URL, API_KEY } from '../api/client';
+import { API_BASE_URL } from '../api/client';
+import { liveSocketUrl, requestLiveTicket } from '../api/auth';
 
 const WS_BASE = (() => {
   try {
@@ -27,15 +28,22 @@ export function useExecutionSocket(executionId: string | undefined) {
   const retryRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const connect = useCallback(() => {
-    if (!executionId) return;
+  const stoppedRef = useRef(false);
+
+  const scheduleRetry = useCallback((connectAgain: () => void) => {
+    const delay = Math.min(1000 * 2 ** retryRef.current, 30000);
+    retryRef.current++;
+    timerRef.current = setTimeout(connectAgain, delay);
+  }, []);
+
+  const connect = useCallback(async () => {
+    if (!executionId || stoppedRef.current) return;
     try {
-      const params = new URLSearchParams();
-      if (API_KEY) params.set('api_key', API_KEY);
-      const qs = params.toString();
-      const ws = new WebSocket(
-        `${WS_BASE}/api/executions/${encodeURIComponent(executionId)}/live${qs ? `?${qs}` : ''}`
-      );
+      // The long-lived API key never appears in the socket URL. A short-lived
+      // ticket, bound to this execution, is minted per connection attempt.
+      const ticket = await requestLiveTicket(API_BASE_URL, executionId);
+      if (stoppedRef.current) return;
+      const ws = new WebSocket(liveSocketUrl(WS_BASE, executionId, ticket));
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -53,9 +61,7 @@ export function useExecutionSocket(executionId: string | undefined) {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
-        const delay = Math.min(1000 * 2 ** retryRef.current, 30000);
-        retryRef.current++;
-        timerRef.current = setTimeout(connect, delay);
+        scheduleRetry(connect);
       };
 
       ws.onerror = () => {
@@ -63,12 +69,15 @@ export function useExecutionSocket(executionId: string | undefined) {
       };
     } catch {
       setConnected(false);
+      if (!stoppedRef.current) scheduleRetry(connect);
     }
-  }, [executionId]);
+  }, [executionId, scheduleRetry]);
 
   useEffect(() => {
+    stoppedRef.current = false;
     connect();
     return () => {
+      stoppedRef.current = true;
       if (timerRef.current) clearTimeout(timerRef.current);
       if (wsRef.current) {
         wsRef.current.onclose = null;

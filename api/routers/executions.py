@@ -31,8 +31,16 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from api.auth import get_api_key, is_valid_api_key
-from api.database import get_db, SessionLocal
+from api.auth import (
+    get_any_scope_api_key,
+    get_api_key,
+    is_valid_api_key,
+    issue_ws_ticket,
+    verify_ws_ticket,
+)
+from api.confirmation import require_confirmation
+from api import database
+from api.database import get_db
 from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
 from api.services import replay
 from api.services.evidence_record import build_evidence_record, source_time
@@ -424,6 +432,8 @@ async def update_execution(
     if payload.status is not None:
         if payload.status not in VALID_EXECUTION_STATUSES:
             raise HTTPException(status_code=400, detail=f"Invalid status: {payload.status}")
+        if payload.status == "abandoned":
+            require_confirmation(payload.confirm, "abandon this execution")
         execution.status = payload.status
         if payload.status in TERMINAL_EXECUTION_STATUSES and execution.completed_at is None:
             execution.completed_at = datetime.now(timezone.utc)
@@ -451,7 +461,12 @@ async def update_execution(
 
 
 @router.delete("/executions/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_execution(execution_id: int, db: Session = Depends(get_db)):
+def delete_execution(
+    execution_id: int,
+    confirm: bool = Query(False, description="Must be true to delete the execution"),
+    db: Session = Depends(get_db),
+):
+    require_confirmation(confirm, "delete this execution")
     execution = _ensure_execution(db, execution_id)
     db.delete(execution)
     db.commit()
@@ -742,18 +757,38 @@ def diff_executions(execution_id: int, other_id: int, db: Session = Depends(get_
     return _diff_step_state(a, b)
 
 
+@ws_router.post(
+    "/executions/{execution_id}/live-ticket",
+    dependencies=[Depends(get_any_scope_api_key)],
+)
+def create_live_ticket(execution_id: int, db: Session = Depends(get_db)):
+    """Mint a short-lived ticket for the live socket of one execution.
+
+    Browsers cannot set headers on a WebSocket, and the long-lived API key must
+    not travel in a URL. The ticket is bound to this execution, expires in
+    seconds, and is accepted only by the live socket.
+    """
+    _ensure_execution(db, execution_id)
+    ticket, expires_in = issue_ws_ticket(execution_id)
+    return {"ticket": ticket, "expires_in": expires_in}
+
+
 @ws_router.websocket("/executions/{execution_id}/live")
 async def execution_socket(websocket: WebSocket, execution_id: int):
-    # A supplied header is authoritative, even if empty or invalid.
-    # Query authentication remains available for clients without a header.
+    # Non-browser clients send the API key header; browsers present a ticket
+    # from POST /live-ticket. A supplied header is authoritative, even if empty
+    # or invalid. The API key is never accepted in the query string.
     api_key = websocket.headers.get("X-API-Key")
-    if api_key is None:
-        api_key = websocket.query_params.get("api_key")
-    if not is_valid_api_key(api_key):
+    if api_key is not None:
+        authorized = is_valid_api_key(api_key)
+    else:
+        authorized = verify_ws_ticket(websocket.query_params.get("ticket"), execution_id)
+    if not authorized:
         await websocket.close(code=4401)
         return
 
-    db = SessionLocal()
+    # Resolved at call time so the session factory matches get_db.
+    db = database.SessionLocal()
     try:
         exists = db.query(Execution.id).filter(Execution.id == execution_id).first()
     finally:

@@ -179,7 +179,10 @@ def test_integration(tool: str, db: Session = Depends(get_db)):
             timeout=5,
             verify=integration.verify_ssl,
             allow_redirects=False,
+            stream=True,
         )
+        # Only the status code is used; drop the body without buffering it.
+        resp.close()
         if resp.status_code in (200, 401, 403):
             integration.last_status = "connected"
         else:

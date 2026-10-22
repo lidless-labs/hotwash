@@ -264,7 +264,7 @@ def test_wazuh_mock_mode_short_circuits_without_client(client, temp_db, api_key)
         resp = client.post(
             "/api/integrations/wazuh/actions/run_active_response",
             headers={"X-API-Key": api_key},
-            json={"command": "restart-wazuh0", "agent_ids": ["001"]},
+            json={"command": "restart-wazuh0", "agent_ids": ["001"], "confirm": True},
         )
 
     assert resp.status_code == 200
@@ -288,6 +288,8 @@ def test_action_result_attaches_to_run_evidence_before_return(client, temp_db, a
             "status_code": 200,
             "text": '{"ok": true}',
             "json": lambda self: {"ok": True},
+            "iter_content": lambda self, chunk_size=1: iter(()),
+            "close": lambda self: None,
         },
     )()
     with patch(

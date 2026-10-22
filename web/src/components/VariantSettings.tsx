@@ -3,6 +3,7 @@
  * Sits in bottom-left to complement the keyboard hints FAB in bottom-right.
  */
 import React, { useState } from 'react';
+import { hasStoredApiKey, setApiKey } from '../api/auth';
 
 interface VariantSettingsProps {
   currentVariant: number | null;
@@ -20,6 +21,16 @@ export const VariantSettings: React.FC<VariantSettingsProps> = ({
   variantNames = DEFAULT_NAMES,
 }) => {
   const [open, setOpen] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+  const [keySaved, setKeySaved] = useState(hasStoredApiKey());
+
+  // Pages read the key when they load, so reload to apply a change.
+  const saveKey = (value: string | null) => {
+    setApiKey(value);
+    setKeyInput('');
+    setKeySaved(hasStoredApiKey());
+    window.location.reload();
+  };
 
   return (
     <>
@@ -176,6 +187,90 @@ export const VariantSettings: React.FC<VariantSettingsProps> = ({
                   </button>
                 );
               })}
+            </div>
+
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  color: 'rgba(255,255,255,0.4)',
+                  marginBottom: 8,
+                }}
+              >
+                Backend API Key
+              </div>
+              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginBottom: 8, lineHeight: 1.5 }}>
+                Held for this browser session only and never built into the app.
+                {keySaved ? ' A key is set.' : ' No key is set.'}
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (keyInput.trim()) saveKey(keyInput);
+                }}
+                style={{ display: 'flex', gap: 6 }}
+              >
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="HOTWASH_API_KEY"
+                  aria-label="Backend API key"
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'rgba(255,255,255,0.06)',
+                    color: 'rgba(255,255,255,0.8)',
+                    fontSize: 12,
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!keyInput.trim()}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'rgba(6, 182, 212, 0.25)',
+                    color: 'rgba(6, 182, 212, 0.95)',
+                    fontSize: 12,
+                    cursor: keyInput.trim() ? 'pointer' : 'default',
+                    opacity: keyInput.trim() ? 1 : 0.5,
+                  }}
+                >
+                  Save
+                </button>
+                {keySaved && (
+                  <button
+                    type="button"
+                    onClick={() => saveKey(null)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      background: 'transparent',
+                      color: 'rgba(255,255,255,0.6)',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </form>
             </div>
 
             {defaultVariant !== null && (
