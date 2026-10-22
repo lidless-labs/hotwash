@@ -70,6 +70,10 @@ cd web && npm test                  # web parser tests
 cd mcp && npm run typecheck && npm run build   # MCP server
 ```
 
+## Updating pinned actions
+
+Every `uses:` line in `.github/workflows/ci.yml` is pinned to a full commit SHA, with the release it points at in a trailing comment. Dependabot opens a weekly grouped PR for GitHub Actions, npm (`mcp` and `web`) and pip. To bump a pin by hand, resolve the new release tag to its commit (`gh api repos/<owner>/<action>/git/ref/tags/<tag>`), replace the SHA, and update the version comment. Keep the workflow-level `permissions: contents: read` and grant extra scopes only to the job that needs them.
+
 ## Filing issues
 
 Please use the templates under `.github/ISSUE_TEMPLATE/`. Before posting output, remove tokens, private hostnames, real private repo names, and unredacted absolute paths.
