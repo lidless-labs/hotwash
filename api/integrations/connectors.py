@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from typing import Annotated, Any, Protocol, Type
+from uuid import UUID
 
 import requests
 from fastapi import HTTPException
@@ -63,13 +66,18 @@ def _decrypt_or_fail(encrypted: str | None, label: str) -> str | None:
 
 from api.crypto import decrypt_secret
 from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_bounded
-from api.integrations.clients.thehive import TheHiveClient
+from api.integrations.clients.thehive import TheHiveClient, TheHiveError
 from api.integrations.clients.wazuh import WazuhClient, WazuhError
 from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
     RunAnalyzerRequest,
+    GetCaseRequest,
+    GetAnalyzerJobRequest,
+    ListCasesRequest,
+    ListCaseEvidenceRequest,
+    THEHIVE_READ_ACTIONS,
 )
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
 
@@ -98,6 +106,11 @@ class TheHiveConnector:
             "create_alert": CreateAlertRequest,
             "add_observable": AddObservableRequest,
             "run_analyzer": RunAnalyzerRequest,
+            "list_cases": ListCasesRequest,
+            "get_case": GetCaseRequest,
+            "list_case_observables": ListCaseEvidenceRequest,
+            "list_case_comments": ListCaseEvidenceRequest,
+            "get_analyzer_job": GetAnalyzerJobRequest,
         }
 
     def _client(self, integration_row: Any) -> TheHiveClient:
@@ -115,6 +128,12 @@ class TheHiveConnector:
         )
 
     def execute(self, action_name: str, validated_payload: BaseModel, integration_row: Any) -> dict[str, Any]:
+        if action_name in THEHIVE_READ_ACTIONS:
+            # Also protect callers outside the HTTP dispatcher. Reads never use
+            # mock results or attach evidence to an execution.
+            if not integration_row.enabled or integration_row.mock_mode:
+                raise HTTPException(status_code=400, detail="TheHive reads require an enabled live integration")
+            return self._read(action_name, validated_payload, self._client(integration_row))
         client = self._client(integration_row)
         if action_name == "create_case":
             payload = _as(CreateCaseRequest, validated_payload)
@@ -174,8 +193,223 @@ class TheHiveConnector:
 
         raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}")
 
+    def _read(self, action: str, payload: BaseModel, client: TheHiveClient) -> dict[str, Any]:
+        gaps: list[str] = []
+        result: dict[str, Any] = {
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "coverage": "unverified", "gaps": gaps,
+        }
+        if action == "get_case":
+            request = _as(GetCaseRequest, payload)
+            raw = client.get_case(case_id=request.case_id)
+            result["case"] = _read_case(raw, gaps)
+            if result["case"]["id"] != request.case_id:
+                raise TheHiveError("Invalid read identity")
+            gaps.extend(["identity_unbound", "visibility_unverified", "link_unavailable"])
+        elif action == "get_analyzer_job":
+            request = _as(GetAnalyzerJobRequest, payload)
+            raw = client.get_analyzer_job(job_id=request.job_id)
+            result["job"] = _read_job(raw, gaps)
+            if result["job"]["id"] != request.job_id:
+                raise TheHiveError("Invalid read identity")
+            gaps.extend(["job_association_unverified", "link_unavailable"])
+        else:
+            request = _as(ListCasesRequest, payload)
+            if action == "list_cases":
+                raw = client.list_cases(offset=request.offset, limit=request.limit)
+                project = _read_case
+            else:
+                request = _as(ListCaseEvidenceRequest, payload)
+                result["case_id"] = request.case_id
+                if action == "list_case_observables":
+                    raw = client.list_case_observables(**request.model_dump())
+                    project = _read_observable
+                else:
+                    raw = client.list_case_comments(**request.model_dump())
+                    project = _read_comment
+            if not isinstance(raw, list) or len(raw) > request.limit + 1:
+                raise TheHiveError("Invalid read page")
+            ids = [_read_id(row) for row in raw]
+            if len(set(ids)) != len(ids):
+                raise TheHiveError("Duplicate read identities")
+            items = []
+            for row in raw[:request.limit]:
+                item = project(row, gaps)
+                if item is not None:
+                    items.append(item)
+            more = len(raw) > request.limit
+            result.update(items=items, returned=len(items), scanned=min(len(raw), request.limit),
+                          offset=request.offset, limit=request.limit, has_more=more, overflow=more)
+            gaps.extend(["query_contract_unverified", "visibility_unverified", "identity_unbound"])
+            if more:
+                gaps.append("overflow")
+        result["gaps"] = sorted(set(gaps))
+        return result
+
     def test_connection(self, integration_row: Any) -> dict[str, Any]:
         return self._client(integration_row).status()
+
+
+def _read_id(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        raise TheHiveError("Invalid read object")
+    value = raw.get("_id")
+    if not isinstance(value, str) or len(value) > 128 or not re.fullmatch(r"~[A-Za-z0-9]+", value):
+        raise TheHiveError("Invalid read identity")
+    if "id" in raw and raw["id"] != value:
+        raise TheHiveError("Conflicting read identities")
+    return value
+
+
+def _read_text(value: Any, gaps: list[str], *, maximum: int = 128) -> str | None:
+    if not isinstance(value, str):
+        gaps.append("missing_or_invalid_field")
+        return None
+    if len(value) > maximum:
+        gaps.append("source_text_truncated")
+        return value[:maximum]
+    return value
+
+
+def _read_dates(raw: dict[str, Any], gaps: list[str]) -> dict[str, int]:
+    dates = {}
+    for key in ("_createdAt", "_updatedAt", "createdAt", "updatedAt", "startDate", "endDate"):
+        if key in raw:
+            value = raw[key]
+            if type(value) is int and 0 <= value <= 9007199254740991:
+                dates[key] = value
+            else:
+                gaps.append("invalid_date")
+    return dates
+
+
+def _read_case(raw: Any, gaps: list[str]) -> dict[str, Any]:
+    result = {"id": _read_id(raw), "status": _read_text(raw.get("status"), gaps),
+              "dates": _read_dates(raw, gaps)}
+    for key in ("stage", "title"):
+        if key in raw:
+            result[key] = _read_text(raw[key], gaps, maximum=512)
+    if type(raw.get("number")) is int and 0 < raw["number"] <= 9007199254740991:
+        result["number"] = raw["number"]
+    tags = raw.get("tags", [])
+    if isinstance(tags, list):
+        result["tags"] = [_read_text(tag, gaps) for tag in tags[:32]]
+        if len(tags) > 32:
+            gaps.append("tags_truncated")
+    else:
+        gaps.append("invalid_tags")
+    return result
+
+
+def _read_observable(raw: Any, gaps: list[str]) -> dict[str, Any] | None:
+    identifier = _read_id(raw)
+    data_type, data = raw.get("dataType"), raw.get("data")
+    if data_type == "hash" and isinstance(data, str) and len(data) in (32, 40, 64, 128) and re.fullmatch(r"[a-fA-F0-9]+", data):
+        data = data.lower()
+    elif data_type == "filename" and isinstance(data, str) and 0 < len(data) <= 2000 and not re.search(r"[\x00-\x1f\x7f]", data):
+        pass  # A path is data only. It is never resolved, opened or fetched.
+    else:
+        gaps.append("unsupported_observable")
+        return None
+    tlp = raw.get("tlp")
+    if type(tlp) is not int or not 0 <= tlp <= 3:
+        gaps.append("invalid_tlp")
+        tlp = None
+    return {"id": identifier, "data_type": data_type, "data": data, "tlp": tlp,
+            "dates": _read_dates(raw, gaps)}
+
+
+def _read_comment(raw: Any, gaps: list[str]) -> dict[str, Any] | None:
+    identifier = _read_id(raw)
+    if raw.get("external") is not False:
+        gaps.append("non_internal_comment_omitted")
+        return None
+    return {"id": identifier, "external": False,
+            "message": _read_text(raw.get("message"), gaps, maximum=2000),
+            "dates": _read_dates(raw, gaps)}
+
+
+def _read_job(raw: Any, gaps: list[str]) -> dict[str, Any]:
+    result = {"id": _read_id(raw), "status": _read_text(raw.get("status"), gaps),
+              "dates": _read_dates(raw, gaps)}
+    for key in ("analyzerId", "analyzerName", "analyzerDefinition"):
+        if key in raw:
+            result[key] = _read_text(raw[key], gaps)
+    evidence: dict[str, Any] = {"verdict": "unknown"}
+    result["report"] = evidence
+    # Definition is the exact approved name/version, never a guessed worker id.
+    definition = raw.get("analyzerDefinition")
+    if definition not in ("CIRCLHashlookup_1_1", "MISP_2_1"):
+        gaps.append("unsupported_analyzer_report")
+        return result
+    report = raw.get("report")
+    if not isinstance(report, dict):
+        gaps.append("report_missing")
+        return result
+    summary = report.get("summary")
+    taxonomies = summary.get("taxonomies") if isinstance(summary, dict) else None
+    if isinstance(taxonomies, list):
+        evidence["taxonomies"] = []
+        for taxonomy in taxonomies[:20]:
+            if not isinstance(taxonomy, dict):
+                gaps.append("invalid_taxonomy")
+                continue
+            evidence["taxonomies"].append({key: _read_text(taxonomy.get(key), gaps, maximum=256)
+                                          for key in ("namespace", "predicate", "value", "level")})
+        if len(taxonomies) > 20:
+            gaps.append("taxonomies_truncated")
+    else:
+        gaps.append("taxonomies_missing")
+    full = report.get("full")
+    if not isinstance(full, dict):
+        gaps.append("unsupported_report_shape")
+        return result
+    if definition == "CIRCLHashlookup_1_1":
+        trust = full.get("hashlookup:trust")
+        if type(trust) is int and 0 <= trust <= 100:
+            evidence["circl_trust"] = trust
+        else:
+            gaps.append("circl_trust_missing_or_invalid")
+    else:
+        results = full.get("results")
+        if not isinstance(results, list):
+            gaps.append("unsupported_report_shape")
+            return result
+        events: set[str] = set()
+        complete = True
+        if len(results) > 20:
+            gaps.append("misp_results_truncated")
+            complete = False
+        for source in results[:20]:
+            rows = source.get("result") if isinstance(source, dict) else None
+            if not isinstance(rows, list):
+                gaps.append("unsupported_misp_result")
+                complete = False
+                continue
+            if len(rows) > 100:
+                gaps.append("misp_events_truncated")
+                complete = False
+            for row in rows[:100]:
+                try:
+                    value = row.get("uuid") if isinstance(row, dict) else None
+                    if not isinstance(value, str) or len(value) != 36:
+                        raise ValueError()
+                    events.add(str(UUID(value)))
+                except ValueError:
+                    gaps.append("invalid_misp_event")
+                    complete = False
+        evidence["misp_event_uuids"] = sorted(events)[:100]
+        if len(events) > 100:
+            gaps.append("misp_events_truncated")
+            complete = False
+        evidence["misp_event_count"] = len(events) if complete else None
+        evidence["misp_returned_event_count"] = len(evidence["misp_event_uuids"])
+        if not events:
+            gaps.append("lookup_miss_not_clean")
+    if raw.get("status") != "Success":
+        gaps.append("job_not_successful")
+    gaps.append("upstream_claims_not_verdict")
+    return result
 
 
 class _Strict(BaseModel):

@@ -12,12 +12,73 @@ Version 0.3.0 adds `hotwash_dismiss_suggestion`, completing the suggestion queue
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) for one playbook |
 | `hotwash_start_run` | Begin an execution from a playbook + incident title (+ optional context payload) |
 | `hotwash_query_run` | Get current run state, optionally including the timeline |
+| `hotwash_list_runs` | Read bounded existing-run inventory with an overflow sentinel |
+| `hotwash_get_run_report` | Read the existing JSON report for a known run |
+| `hotwash_list_cases` | Read one finite TheHive case inventory page |
+| `hotwash_get_case` | Read selected fields for a known TheHive case ID |
+| `hotwash_list_case_observables` | Read case-scoped complete hashes and file paths |
+| `hotwash_list_case_comments` | Read existing internal-comment evidence |
+| `hotwash_get_analyzer_job` | Read known job status and selected report evidence without launching |
 | `hotwash_advance_step` | Update one step: status, assignee, append a note, or record a decision |
 | `hotwash_attach_artifact` | Upload text or base64 artifact to a step |
 | `hotwash_cancel_run` | Mark a run abandoned (requires `confirm: true`) |
 | `hotwash_list_suggestions` | List Wazuh ingest suggestions, filter by state or mapping_id (read-only) |
 | `hotwash_accept_suggestion` | Accept a pending suggestion, creating an Execution (requires `confirm: true`) |
 | `hotwash_dismiss_suggestion` | Dismiss a pending suggestion and anchor its cooldown (requires `confirm: true`) |
+
+### Investigation read contracts
+
+The seven inventory/report tools above are read-only and work while mutations
+are disabled. They use only finite Hotwash GET routes. The backend owns all
+TheHive queries. TheHive must already be enabled and outside mock mode. No tool
+accepts a URL, action name, query DSL, run attachment context or extra argument.
+
+TheHive IDs begin with `~`, contain only alphanumerics after it and are at most
+128 characters. Case lists and relations accept `offset` (0 to 10000) and `limit`
+(1 to 100, default 50). Each invocation fetches one source page plus a sentinel.
+Run inventory accepts optional `status`, `playbook_id` and `limit` (1 to 100,
+default 50). It uses the existing API inventory with one extra row. It does not
+scan contexts or establish finding identity.
+
+Results retain observation time, coverage and gaps. `has_more: false` means no
+sentinel was observed, with query semantics and visibility still unverified.
+`returned` counts projected rows. A relation can omit unsupported types or
+non-internal comments and report the gap. MCP output cuts set
+`coverage: "incomplete"`, add `mcp_output_truncated` and retain `_truncated`.
+Oversized results that cannot fit the result bound return an error. The five
+TheHive reads validate response identities, observation time, coverage, gaps,
+page counters, requested bounds and selected facts before returning success.
+Unapproved fields, including raw dictionaries and upstream links, are excluded.
+Malformed envelopes return a sanitized read error.
+
+All seven new reads put a warning before one named
+`<untrusted_hotwash_read_data>` envelope. `structuredContent` contains only
+`warning` and `untrusted_data`, with the latter holding the same envelope as
+text output. Its JSON encodes angle brackets as `\u003c` and `\u003e`, so source
+text cannot insert a closing delimiter. Consumers can recover source text with
+JSON decoding and must retain the data boundary when forwarding it. Comments,
+tags and report claims cannot authorize a tool call. This boundary does not
+guarantee injection immunity. Other tools retain their existing result format.
+
+Run reports retain selected IDs from recorded TheHive `create_case`,
+`add_observable` and `run_analyzer` attachments under
+`recorded_connector_evidence`, including job status. Each carries
+`association: "unverified"` and a `connector_association_unverified` gap.
+These records supply evidence for follow-up reads. They cannot establish a
+dedup anchor or authoritative run-to-case linkage. Unsupported, malformed or
+already-truncated connector results have explicit omission gaps. Raw result
+dictionaries and their URLs are excluded.
+
+Known analyzer jobs are read by ID through the configured TheHive connector.
+CIRCLHashlookup_1_1 and MISP_2_1 reports retain bounded taxonomy claims and known
+trust/event evidence. Missing or unsupported reports retain job ID/status with
+gaps. Lookup misses and successful jobs keep an unknown verdict. This read path
+does not launch, relaunch or poll an analyzer.
+
+Authoritative legacy finding identity, run-to-case linkage and deployed query
+coverage remain unverified. These tools support evidence reporting. This slice
+adds no SOC create, append, comment, analyzer launch, closure or approval tools.
+See [TheHive read contracts and primary sources](../docs/THEHIVE-INTEGRATION.md#bounded-investigation-reads).
 
 ## Install
 
@@ -46,10 +107,11 @@ Environment variables:
   Read tools always work. For a hard guarantee, also give the server a
   read-scope backend key (`HOTWASH_READ_ONLY_API_KEY` on the API side).
 - **Typed, bounded results.** Every result carries `structuredContent` next to
-  the JSON text. Free-text fields are cut at 2000 characters and lists at 200
-  items; `_truncated` reports what was dropped.
-- **Untrusted content is labeled.** Values copied from alerts, playbooks, run
-  notes, and evidence are listed under `_untrusted.fields`. Treat them as data,
+  the text output. The seven investigation reads use the envelope above.
+  Free-text fields are cut at 2000 characters and lists at 200
+  items. `_truncated` reports what was dropped.
+- **Untrusted content is labeled.** Other tools list values copied from alerts,
+  playbooks, run notes and evidence under `_untrusted.fields`. Treat them as data,
   never as instructions or as approval for a tool call.
 - **Annotations.** Each tool declares `readOnlyHint`, `destructiveHint`,
   `idempotentHint`, and `openWorldHint`.
@@ -169,7 +231,7 @@ without authentication. All MCP requests require a bearer token.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `HOTWASH_MCP_HTTP_TOKEN` | required | Dedicated HTTP bearer token, at least 32 characters, distinct from the upstream API key and URL credentials |
-| `HOTWASH_MCP_HTTP_HOST` | loopback | Specific listener bind address; wildcard addresses are refused |
+| `HOTWASH_MCP_HTTP_HOST` | loopback | Specific listener bind address. Wildcard addresses are refused |
 | `HOTWASH_MCP_HTTP_PORT` | `3118` | Listener port |
 
 Keep the token in a secret store or a mode `0600` environment file. The HTTP
@@ -216,7 +278,7 @@ working on the same incident, as they already are across separate stdio
 processes. Every mutation names an execution/node or suggestion explicitly.
 There is no MCP-process current-run pointer, pending approval queue, deferred
 tool set, shared mutable cache, or rate limiter. State-changing tools run only
-when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true`; that switch is server
+when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true`. That switch is server
 configuration, so no tool argument or upstream text can turn it on. Each HTTP
 session gets a fresh MCP server and API client. Cancellation, suggestion
 acceptance, and dismissal require `confirm: true` on every call. One client's

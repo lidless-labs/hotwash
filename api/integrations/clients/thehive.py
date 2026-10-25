@@ -13,6 +13,7 @@ import requests
 
 from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_bounded
 from api.security import PinnedURL, apply_host_pinning
+from api.integrations.schemas import GetAnalyzerJobRequest, GetCaseRequest, ListCasesRequest
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class TheHiveClient:
         *,
         json: Any | None = None,
         params: dict[str, Any] | None = None,
+        require_success: bool = False,
     ) -> Any:
         url = f"{self._request_base}{path}"
         try:
@@ -99,6 +101,9 @@ class TheHiveClient:
                 status_code=None,
                 details={"upstream": "connection_error"},
             ) from exc
+
+        if require_success and not 200 <= resp.status_code < 300:
+            raise TheHiveError("TheHive read failed", status_code=resp.status_code)
 
         if resp.status_code == 401:
             try:
@@ -255,3 +260,37 @@ class TheHiveClient:
             "artifactId": artifact_id,
         }
         return self._request("POST", "/api/v1/connector/cortex/job", json=payload)
+
+    def list_cases(self, *, offset: int = 0, limit: int = 50) -> Any:
+        page = ListCasesRequest(offset=offset, limit=limit)
+        return self._read_page("cases", [{"_name": "listCase"}], page)
+
+    def get_case(self, *, case_id: str) -> Any:
+        request = GetCaseRequest(case_id=case_id)
+        return self._request("GET", f"/api/v1/case/{request.case_id}", require_success=True)
+
+    def list_case_observables(self, *, case_id: str, offset: int = 0, limit: int = 50) -> Any:
+        request = GetCaseRequest(case_id=case_id)
+        page = ListCasesRequest(offset=offset, limit=limit)
+        return self._read_page("case-observables", [
+            {"_name": "getCase", "idOrName": request.case_id}, {"_name": "observables"},
+        ], page)
+
+    def list_case_comments(self, *, case_id: str, offset: int = 0, limit: int = 50) -> Any:
+        request = GetCaseRequest(case_id=case_id)
+        page = ListCasesRequest(offset=offset, limit=limit)
+        return self._read_page("case-comments", [
+            {"_name": "getCase", "idOrName": request.case_id}, {"_name": "comments"},
+        ], page, date_field="createdAt")
+
+    def _read_page(self, name: str, prefix: list[dict[str, Any]], page: ListCasesRequest,
+                   *, date_field: str = "_createdAt") -> Any:
+        # Fixed query grammar; one bounded page with a sentinel, never a crawl.
+        return self._request("POST", "/api/v1/query", params={"name": name}, json={"query": [
+            *prefix, {"_name": "sort", "_fields": [{date_field: "asc"}, {"_id": "asc"}]},
+            {"_name": "page", "from": page.offset, "to": page.offset + page.limit + 1, "extraData": []},
+        ]}, require_success=True)
+
+    def get_analyzer_job(self, *, job_id: str) -> Any:
+        request = GetAnalyzerJobRequest(job_id=job_id)
+        return self._request("GET", f"/api/connector/cortex/job/{request.job_id}", require_success=True)

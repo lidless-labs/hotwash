@@ -6,6 +6,7 @@ import { registerArtifactTools } from "./tools/artifacts.js";
 import { registerPlaybookTools } from "./tools/playbooks.js";
 import { registerRunTools } from "./tools/runs.js";
 import { registerSuggestionTools } from "./tools/suggestions.js";
+import { registerSocTools } from "./tools/soc.js";
 
 // Protocol registrations and client configuration belong to one MCP session.
 export function createMcpServer(config: HotwashConfig = getConfig()): McpServer {
@@ -23,6 +24,7 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   registerRunTools(server, client, policy);
   registerArtifactTools(server, client, policy);
   registerSuggestionTools(server, client, policy);
+  registerSocTools(server, client);
 
   return server;
 }

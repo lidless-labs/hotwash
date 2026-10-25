@@ -8,6 +8,7 @@ import { createHttpServer, type HttpServerHandle } from "../http.js";
 
 const token = randomUUID();
 const originalEnv = { ...process.env };
+const originalFetch = globalThis.fetch;
 let http: HttpServerHandle | undefined;
 const connections: { client: Client; transport: StreamableHTTPClientTransport }[] = [];
 afterEach(async () => {
@@ -18,6 +19,7 @@ afterEach(async () => {
   await http?.close();
   http = undefined;
   process.env = { ...originalEnv };
+  globalThis.fetch = originalFetch;
 });
 function configure() {
   process.env.HOTWASH_URL = "http://example.invalid";
@@ -73,6 +75,26 @@ test("lists tools and invalidates a terminated session", async () => {
     headers: { authorization: `Bearer ${token}`, "mcp-session-id": id, accept: "text/event-stream" },
   });
   assert.equal(response.status, 404);
+});
+
+test("HTTP transport executes a known analyzer job read without launching it", async () => {
+  configure();
+  const requests: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("http://example.invalid/")) {
+      requests.push(String(input));
+      assert.equal(init?.method ?? "GET", "GET");
+      return new Response(JSON.stringify({ job: { id: "~J1", status: "Waiting", dates: {}, report: { verdict: "unknown" } },
+        observed_at: "2026-01-01T00:00:00Z", coverage: "unverified", gaps: ["report_missing"] }));
+    }
+    return originalFetch(input, init);
+  };
+  const { client } = await connect(await start());
+  const result = await client.callTool({ name: "hotwash_get_analyzer_job", arguments: { job_id: "~J1" } });
+  assert.notEqual(result.isError, true);
+  const envelope = (result.structuredContent as { untrusted_data: string }).untrusted_data;
+  assert.equal(JSON.parse(envelope.split("\n").slice(1, -1).join("\n")).job.id, "~J1");
+  assert.deepEqual(requests, ["http://example.invalid/api/integrations/thehive/analyzer-jobs/~J1"]);
 });
 for (const headers of [
   { origin: "https://evil.example.com" }, { origin: "null" },
