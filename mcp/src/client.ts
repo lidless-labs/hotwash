@@ -10,6 +10,13 @@ import type {
   SuggestionState,
   SuggestionSummary,
   TimelineEvent,
+  ReadMetadata,
+  ReadPage,
+  CaseEvidence,
+  ObservableEvidence,
+  CommentEvidence,
+  AnalyzerJobEvidence,
+  RunReport,
 } from "./types.js";
 
 const MAX_REDIRECTS = 3;
@@ -165,6 +172,46 @@ export class HotwashClient {
     if (filters.limit !== undefined) params.set("limit", String(filters.limit));
     const qs = params.toString();
     return this.request<ExecutionSummary[]>(`/api/executions${qs ? `?${qs}` : ""}`);
+  }
+
+  // Read failures expose no backend text, request URLs or transport details.
+  private async evidenceRead<T>(path: string): Promise<T> {
+    try {
+      return await this.request<T>(path);
+    } catch {
+      throw new Error("Hotwash read failed; evidence unavailable");
+    }
+  }
+
+  getRunReport(executionId: number): Promise<RunReport> {
+    return this.evidenceRead(`/api/executions/${executionId}/report`);
+  }
+
+  listCases(page: { offset?: number; limit?: number } = {}): Promise<ReadPage<CaseEvidence>> {
+    return this.evidenceRead(`/api/integrations/thehive/cases${this.readPageQuery(page)}`);
+  }
+
+  getCase(caseId: string): Promise<ReadMetadata & { case: CaseEvidence }> {
+    return this.evidenceRead(`/api/integrations/thehive/cases/${encodeURIComponent(caseId)}`);
+  }
+
+  listCaseObservables(caseId: string, page: { offset?: number; limit?: number } = {}): Promise<ReadPage<ObservableEvidence>> {
+    return this.evidenceRead(`/api/integrations/thehive/cases/${encodeURIComponent(caseId)}/observables${this.readPageQuery(page)}`);
+  }
+
+  listCaseComments(caseId: string, page: { offset?: number; limit?: number } = {}): Promise<ReadPage<CommentEvidence>> {
+    return this.evidenceRead(`/api/integrations/thehive/cases/${encodeURIComponent(caseId)}/comments${this.readPageQuery(page)}`);
+  }
+
+  getAnalyzerJob(jobId: string): Promise<ReadMetadata & { job: AnalyzerJobEvidence }> {
+    return this.evidenceRead(`/api/integrations/thehive/analyzer-jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  private readPageQuery(page: { offset?: number; limit?: number }): string {
+    const params = new URLSearchParams();
+    if (page.offset !== undefined) params.set("offset", String(page.offset));
+    if (page.limit !== undefined) params.set("limit", String(page.limit));
+    return params.size ? `?${params}` : "";
   }
 
   advanceStep(

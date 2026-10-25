@@ -113,3 +113,82 @@ export interface SuggestionAcceptResponse {
   execution: ExecutionSummary;
   already_accepted: boolean;
 }
+
+export interface ReadMetadata {
+  observed_at: string;
+  coverage: "unverified" | "incomplete";
+  gaps: string[];
+}
+
+export interface ReadPage<T> extends ReadMetadata {
+  items: T[];
+  returned: number;
+  scanned: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  overflow: boolean;
+  case_id?: string;
+}
+
+export interface CaseEvidence {
+  id: string;
+  status: string | null;
+  stage?: string | null;
+  title?: string | null;
+  number?: number;
+  tags?: (string | null)[];
+  dates: Record<string, number>;
+}
+
+export interface ObservableEvidence {
+  id: string;
+  data_type: "hash" | "filename";
+  data: string;
+  tlp: number | null;
+  dates: Record<string, number>;
+}
+
+export interface CommentEvidence {
+  id: string;
+  external: false;
+  message: string | null;
+  dates: Record<string, number>;
+}
+
+export interface AnalyzerJobEvidence {
+  id: string;
+  status: string | null;
+  analyzerId?: string | null;
+  analyzerName?: string | null;
+  analyzerDefinition?: string | null;
+  dates: Record<string, number>;
+  report: {
+    verdict: "unknown";
+    taxonomies?: { namespace: string | null; predicate: string | null; value: string | null; level: string | null }[];
+    circl_trust?: number;
+    misp_event_uuids?: string[];
+    misp_event_count?: number | null;
+    misp_returned_event_count?: number;
+  };
+}
+
+export interface RunReport {
+  execution: ExecutionSummary;
+  playbook_title?: string | null;
+  metrics: {
+    total_duration?: string | null;
+    steps_completed?: number;
+    steps_total?: number;
+    mean_step_time?: string | null;
+    bottleneck_step?: string | null;
+    bottleneck_time?: string | null;
+  };
+  timeline: TimelineEvent[];
+  steps: (Omit<ExecutionStep, "evidence"> & {
+    duration?: string | null;
+    // _build_report preserves these recorded attachment fields. They are parsed
+    // only by the new report read, never trusted as run-to-case identity.
+    evidence: (ExecutionEvidence & { connector?: unknown; action?: unknown; result?: unknown })[];
+  })[];
+}

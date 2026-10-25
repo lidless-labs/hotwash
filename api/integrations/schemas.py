@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,3 +55,33 @@ class RunAnalyzerRequest(_Strict):
     artifact_id: str = Field(..., pattern=r"^~[A-Za-z0-9]+$", max_length=128)
     analyzer_id: str = Field(..., pattern=r"^[A-Za-z0-9_-]+$", max_length=128)
     cortex_id: str = Field(default="cortex0", pattern=r"^[A-Za-z0-9_-]+$", max_length=64)
+
+
+# Read IDs deliberately do not inherit whitespace stripping from write schemas.
+TheHiveReadId = Annotated[str, Field(pattern=r"^~[A-Za-z0-9]+$", max_length=128)]
+
+
+class TheHiveReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListCasesRequest(TheHiveReadRequest):
+    offset: int = Field(default=0, ge=0, le=10000)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class GetCaseRequest(TheHiveReadRequest):
+    case_id: TheHiveReadId
+
+
+class ListCaseEvidenceRequest(ListCasesRequest):
+    case_id: TheHiveReadId
+
+
+class GetAnalyzerJobRequest(TheHiveReadRequest):
+    job_id: TheHiveReadId
+
+
+THEHIVE_READ_ACTIONS = frozenset({
+    "list_cases", "get_case", "list_case_observables", "list_case_comments", "get_analyzer_job",
+})

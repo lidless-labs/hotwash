@@ -3,7 +3,9 @@
 <!-- Example IPs below are illustrative private-range placeholders. -->
 <!-- content-guard: allow private-ipv4 file -->
 
-Tested against TheHive **5.4**.
+The existing write integration was tested against TheHive **5.4**. The bounded
+read routes below have mocked verification and upstream source contracts.
+Deployed compatibility and visibility remain unverified.
 
 ## What it does
 
@@ -73,7 +75,7 @@ Request:
 }
 ```
 
-`source_ref` MUST be unique per `source`. TheHive returns 400 if a `(source, sourceRef)` already exists; the API surfaces that as `502` with `upstream_status: 400`.
+`source_ref` MUST be unique per `source`. TheHive returns 400 if a `(source, sourceRef)` already exists. The API surfaces that as `502` with `upstream_status: 400`.
 
 ### `POST /api/integrations/thehive/actions/add_observable`
 
@@ -106,9 +108,101 @@ Request:
 
 `artifact_id` is the TheHive observable id (`~` followed by alphanumerics). `analyzer_id` is the Cortex worker id, not the analyzer name, and `cortex_id` defaults to `cortex0` and allows only letters, digits, `_` and `-`. All three are validated against strict patterns, so path segments, whitespace, and query strings are rejected with `422`.
 
-Hotwash sends `POST /api/v1/connector/cortex/job` with `{"analyzerId", "cortexId", "artifactId"}`. That launch call was verified against TheHive 5.7.5 with Cortex 4.1.0. The response is `{"job_id", "status", "raw"}` taken from TheHive's launch reply. Hotwash does not poll for results: no job-status read route is used because none has been verified, so read the finished report in TheHive. Likewise, Hotwash does not list analyzers (no verified listing endpoint), so look up the worker id for an analyzer such as `CIRCLHashlookup_1_1` in Cortex first.
+Hotwash sends `POST /api/v1/connector/cortex/job` with `{"analyzerId", "cortexId", "artifactId"}`. That launch call was verified against TheHive 5.7.5 with Cortex 4.1.0. The response is `{"job_id", "status", "raw"}` taken from TheHive's launch reply. The separate known-job read below retrieves selected report evidence without launching or polling. Hotwash does not list analyzers, so look up the worker id for an analyzer such as `CIRCLHashlookup_1_1` in Cortex first.
 
 The seeded "Suspicious Binary Triage" playbook uses this action to run `CIRCLHashlookup_1_1` and `MISP_2_1` on each file hash, with the package verification and every approval kept as manual steps. The approval gate is advisory in Hotwash until owner-identity approval exists, so marking it complete is not approval.
+
+## Bounded investigation reads
+
+These GET routes accept the existing read-scope API key. They require an enabled,
+non-mock TheHive integration and reuse its decrypted credential, URL pinning,
+TLS setting, timeout, response body limit and redirect refusal. No read attaches
+evidence to a run, commits local state or launches an analyzer.
+
+| Hotwash route under `/api/integrations/thehive` | Result |
+| --- | --- |
+| `GET /cases` | One finite case inventory page |
+| `GET /cases/{case_id}` | Case ID, status, dates, bounded title/stage/tags and number |
+| `GET /cases/{case_id}/observables` | Case-scoped complete hash and filename facts |
+| `GET /cases/{case_id}/comments` | Existing internal-comment evidence |
+| `GET /analyzer-jobs/{job_id}` | Known job ID/status, dates, analyzer identity and selected report facts |
+
+IDs must match `~` followed by alphanumerics, at most 128 characters including
+the prefix. Whitespace, URL fragments and path separators are refused. Lists
+accept only `offset` (0 to 10000, default 0) and `limit` (1 to 100, default 50).
+All other parameters, duplicate query parameters and generic-action extras are
+rejected. The five corresponding connector action names are `list_cases`,
+`get_case`, `list_case_observables`, `list_case_comments` and `get_analyzer_job`.
+Generic POST dispatch retains write-scope authentication and rejects run/node
+context before it can be removed or attached.
+
+Case inventory uses a fixed `listCase` query. Related lists use `getCase` with
+the validated `idOrName`, then `observables` or `comments`. The backend alone
+builds the sort and page expressions. Each list fetches `limit + 1` rows in one
+request. It never retries, polls or follows another page automatically. Sort is
+ascending creation time then `_id`. Comments use `createdAt`, other rows use
+`_createdAt`.
+
+Every result includes `observed_at`, `coverage` and `gaps`. Pages include `items`,
+`returned`, `scanned`, `offset`, `limit`, `has_more` and `overflow`. The latter two
+describe an observed sentinel. Visibility remains unverified. `returned` counts
+projected items and `scanned` counts source rows before filtering. Unsupported
+observable types, external or unclassified comments, missing fields and text
+cuts remain explicit gaps. Empty pages retain `coverage: "unverified"` and
+`query_contract_unverified`. A server might silently cap a response. Malformed
+pages, duplicate/conflicting IDs, mismatched detail IDs, ignored page bounds
+and failed reads return `502` with only `{"message":"TheHive read failed"}`
+inside `detail`. No raw upstream object, error detail or upstream link is returned.
+
+Observable reads retain only complete MD5/SHA-1/SHA-256/SHA-512 hashes and bounded
+`filename` data. Hashes are lowercase. Paths are never opened or fetched. Case
+membership establishes neither a designated finding anchor nor source/asset/rule
+identity. IDs retain explicit link gaps.
+
+Known-job reads use TheHive's `GET /api/connector/cortex/job/{id}` while the
+existing launch POST path stays unchanged. Only exact `analyzerDefinition`
+values `CIRCLHashlookup_1_1` and `MISP_2_1` receive report projection. Their
+`summary.taxonomies` claims are bounded and labeled as source evidence. Selected
+`full` evidence retains CIRCL `hashlookup:trust` or MISP event UUIDs/counts.
+Truncated or malformed MISP evidence has an unknown total count. Unsupported
+analyzers or report shapes keep the known job ID/status and report a gap. Every
+projected report has `verdict: "unknown"`: a lookup miss, taxonomy label or
+successful job does not certify a file clean.
+
+The corresponding MCP reads validate these API envelopes at runtime. Required
+observation time, coverage, gaps, requested IDs, case association, page counters
+and selected item facts must be valid. Unexpected fields are removed. A known
+job with only an unsupported report retains its ID/status, an unknown verdict
+and explicit report gaps.
+
+The seven new MCP read tools return one `untrusted_hotwash_read_data` envelope
+with a warning before it. Both text and `structuredContent.untrusted_data`
+contain the same envelope. There is no parallel raw object. Angle brackets in
+source JSON are encoded as `\u003c` and `\u003e` to prevent source text from
+inserting a closing delimiter. JSON decoding recovers the source text.
+Consumers must preserve the data boundary. It does not guarantee injection
+immunity or authorize actions from source text.
+
+MCP run reports select strict case/observable/job IDs and job status from
+recorded TheHive connector attachments. These facts are labeled
+`recorded_connector_evidence` with `association: "unverified"`. They are recorded
+evidence, with no authoritative run-to-case binding or dedup anchor. Unsupported,
+malformed and already-truncated connector results have explicit omission gaps.
+Their raw result dictionaries and upstream URL fields are excluded.
+
+The legacy finding-anchor/source namespace, authoritative run-to-case linkage,
+deployed query semantics and principal visibility are unverified. These reads
+cannot certify dedup or a complete case workflow. No new SOC create, append,
+comment, launch, closure or approval tool is provided by this slice.
+
+Primary contracts were retrieved on 2026-10-25, not publication dates:
+[case reads and query traversal](https://raw.githubusercontent.com/TheHive-Project/thehive4py/main/thehive4py/endpoints/case.py),
+[job reads](https://raw.githubusercontent.com/TheHive-Project/thehive4py/main/thehive4py/endpoints/cortex.py),
+[job fields](https://raw.githubusercontent.com/TheHive-Project/thehive4py/main/thehive4py/types/cortex.py),
+[report envelope](https://raw.githubusercontent.com/TheHive-Project/cortexutils/master/cortexutils/analyzer.py),
+[CIRCL report](https://raw.githubusercontent.com/TheHive-Project/Cortex-Analyzers/master/analyzers/CIRCLHashlookup/circlhashlookup_analyzer.py)
+and [MISP report](https://raw.githubusercontent.com/TheHive-Project/Cortex-Analyzers/master/analyzers/MISP/misp.py).
+Upstream branch source establishes request syntax. Deployed compatibility remains unverified.
 
 ## Live smoke test
 
@@ -119,10 +213,10 @@ export HOTWASH_PRIVATE_HOST_ALLOWLIST=192.168.1.0/24
 pytest api/tests/test_thehive_live.py -m live -v -s
 ```
 
-Cleanup: live tests tag cases/alerts with `hotwash-live-test`; sweep via TheHive's tag filter periodically.
+Cleanup: live tests tag cases/alerts with `hotwash-live-test`. Sweep via TheHive's tag filter periodically.
 
 ## Not yet supported
 
 - `update_case` / `close_case` (planned)
-- Cortex analyzer listing and job result polling (`run_analyzer` only launches a job)
-- Webhook receivers from TheHive (Hotwash currently ingests from Wazuh; reverse direction is roadmap)
+- Cortex analyzer listing and automatic job result polling (known-job reads are available)
+- Webhook receivers from TheHive (Hotwash currently ingests from Wazuh. The reverse direction is roadmap)

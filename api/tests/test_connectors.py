@@ -81,6 +81,11 @@ def test_connectors_declare_pydantic_action_schemas():
         "create_alert",
         "add_observable",
         "run_analyzer",
+        "list_cases",
+        "get_case",
+        "list_case_observables",
+        "list_case_comments",
+        "get_analyzer_job",
     }
     assert thehive_actions["run_analyzer"].model_json_schema()["additionalProperties"] is False
 

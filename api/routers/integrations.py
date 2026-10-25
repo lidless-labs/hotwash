@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import update
@@ -27,6 +27,8 @@ from api.integrations.schemas import (
     CreateAlertRequest,
     CreateCaseRequest,
     RunAnalyzerRequest,
+    ListCasesRequest,
+    THEHIVE_READ_ACTIONS,
 )
 from api.orm_models import Execution, ExecutionEvent, RunEvent
 from api.routers.executions import _unique_evidence_path, _validate_node_id_for_path
@@ -403,6 +405,20 @@ def _dispatch_connector_action(
 ) -> dict[str, Any]:
     connector, schema = _schema_for_action(tool, action)
     integration = _get_integration(db, tool)
+    if tool == "thehive" and action in THEHIVE_READ_ACTIONS:
+        # Validate the ORIGINAL body before the generic dispatcher removes run
+        # context. Even null run/node/evidence extras must fail, with no writes.
+        validated = _validate_action_payload(schema, body)
+        if not integration.enabled:
+            raise HTTPException(status_code=400, detail="Integration disabled")
+        if integration.mock_mode:
+            raise HTTPException(status_code=400, detail="Cannot read live evidence in mock mode")
+        try:
+            return connector.execute(action, validated, integration)
+        except (TheHiveError, HTTPException) as exc:
+            # Neither transport exception strings nor upstream bodies are safe
+            # evidence. Keep existing broad actions' error contract unchanged.
+            raise HTTPException(status_code=502, detail={"message": "TheHive read failed"}) from exc
     run_id, node_id, connector_payload = _extract_run_context(body)
     run_context = _validate_run_step(db, run_id, node_id)
     validated_payload = _validate_action_payload(schema, connector_payload)
@@ -453,6 +469,48 @@ def _dispatch_connector_action(
             response.headers["X-Hotwash-Evidence-Status"] = "failed"
 
     return result
+
+
+def _thehive_read_query(request: Request) -> dict[str, str]:
+    values = list(request.query_params.multi_items())
+    if len({key for key, _ in values}) != len(values):
+        raise HTTPException(status_code=422, detail="Duplicate query parameters")
+    return dict(values)
+
+
+@router.get("/integrations/thehive/cases")
+def thehive_list_cases(request: Request, db: Session = Depends(get_db)):
+    return _dispatch_connector_action("thehive", "list_cases", _thehive_read_query(request), db)
+
+
+@router.get("/integrations/thehive/cases/{case_id}")
+def thehive_get_case(case_id: str, request: Request, db: Session = Depends(get_db)):
+    query = _thehive_read_query(request)
+    # Path IDs cannot be overridden by query parameters.
+    if query:
+        raise HTTPException(status_code=422, detail="This read accepts no query parameters")
+    return _dispatch_connector_action("thehive", "get_case", {"case_id": case_id}, db)
+
+
+@router.get("/integrations/thehive/cases/{case_id}/observables")
+def thehive_list_case_observables(case_id: str, request: Request, db: Session = Depends(get_db)):
+    query = _thehive_read_query(request)
+    _validate_action_payload(ListCasesRequest, query)
+    return _dispatch_connector_action("thehive", "list_case_observables", {**query, "case_id": case_id}, db)
+
+
+@router.get("/integrations/thehive/cases/{case_id}/comments")
+def thehive_list_case_comments(case_id: str, request: Request, db: Session = Depends(get_db)):
+    query = _thehive_read_query(request)
+    _validate_action_payload(ListCasesRequest, query)
+    return _dispatch_connector_action("thehive", "list_case_comments", {**query, "case_id": case_id}, db)
+
+
+@router.get("/integrations/thehive/analyzer-jobs/{job_id}")
+def thehive_get_analyzer_job(job_id: str, request: Request, db: Session = Depends(get_db)):
+    if _thehive_read_query(request):
+        raise HTTPException(status_code=422, detail="This read accepts no query parameters")
+    return _dispatch_connector_action("thehive", "get_analyzer_job", {"job_id": job_id}, db)
 
 
 @router.get("/integrations/{tool}/actions")
