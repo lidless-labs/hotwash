@@ -206,6 +206,95 @@ Primary contracts were retrieved on 2026-10-25, not publication dates:
 and [MISP report](https://raw.githubusercontent.com/TheHive-Project/Cortex-Analyzers/master/analyzers/MISP/misp.py).
 Upstream branch source establishes request syntax. Deployed compatibility remains unverified.
 
+## Bounded finding candidates
+
+`GET /api/integrations/thehive/finding-check` accepts a read-scope API key and
+requires the configured, enabled, non-mock TheHive connector. Required query
+fields are `source=wazuh`, `source_instance_ref`, `asset_id`, `rule_id`, and
+`sha256`. The three logical IDs match `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`.
+They are case-sensitive and retain their exact bytes. Whitespace, URLs, paths,
+control characters, unknown fields and duplicate parameters are rejected.
+`sha256` is exactly 64 hexadecimal characters and is normalized to lowercase.
+An optional `run_id` is a canonical positive decimal integer, at most
+9223372036854775807, identifying an existing run. It does not narrow the search.
+Invalid parameters return a finite `422` error. A missing run returns `404`.
+Upstream read failures return sanitized `502` errors without upstream bodies.
+
+The server computes `fingerprint` as `v1:` followed by the lowercase SHA-256
+hex digest of the UTF-8 compact JSON array below. The strings are the validated
+query values. There are no spaces between array elements.
+
+```text
+["hotwash-finding",1,"wazuh",source_instance_ref,asset_id,rule_id,"sha256",lowercase_hash]
+```
+
+Run ID, observation time, title and mapping ID are excluded. The only supported
+case association is the full tag `hotwash:finding:v1:<digest>`, where `<digest>`
+is the 64 lowercase hexadecimal characters from that fingerprint. Matching is
+exact over all raw tags in the bounded response. Titles, tag prefixes and
+substrings do not match. Multiple distinct fingerprint tags or contradictory
+status/stage values produce ambiguity. `New` and `InProgress` statuses map to
+`open`, and `Resolved` and `Deleted` map to `closed`. If present, stage must agree
+with that lifecycle. The supported stage values are those four status names,
+`Open`, and `Closed`. An unknown status or stage produces an explicit gap.
+
+For local runs, the candidate representation is a `context_json.soc_finding_v1`
+object with exactly the five tuple fields, plus an optional validated `case_id`:
+
+```json
+{
+  "soc_finding_v1": {
+    "source": "wazuh",
+    "source_instance_ref": "example-instance",
+    "asset_id": "Asset01",
+    "rule_id": "100100",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "case_id": "~C1"
+  }
+}
+```
+
+This context is caller-controlled. Copied records, provenance labels,
+`started_by`, notes, generic Wazuh context and ingest cooldown fingerprints do
+not authenticate it. Matching runs carry `identity_basis: "untrusted_context_v1"`
+and `attempt_state: null`. A completed step or run does not prove an upstream
+action occurred. Missing or unseen case links block the disposition.
+
+The check makes one fixed `listCase` request at offset 0 with limit 100 and a
+101st overflow sentinel. It scans local runs in ascending ID order across all
+statuses, also with a 101st sentinel. The optional run lookup and inventory
+share a database read transaction. Run context is limited to 65536 UTF-8 bytes
+before loading or parsing it. Oversized, malformed or duplicate-key JSON,
+legacy records without the supported association, malformed identities and cap
+hits contribute finite gaps. The operation performs no source fetch, paging,
+local commit, evidence attachment, step transition or upstream mutation.
+
+The response has `schema_version: 1`, the canonical `candidate` tuple and
+`fingerprint`, safe `case_matches` and `run_matches`, `coverage`, `disposition`,
+and finite `gaps`. Case matches expose only `case_id`, `lifecycle`, and
+`identity_basis: "fingerprint_tag_v1"`. Run matches expose only `run_id`,
+`case_id`, `identity_basis`, and `attempt_state`. Coverage contains `cases`,
+`runs`, `visibility`, `observed_at`, and `contract_version: 1`. A complete local
+scan describes the bounded stored representation only. Case coverage remains
+`unverified` even when the page has no observed overflow.
+
+Dispositions are `one_open_candidate`, `closed_only`, `ambiguous`, `blocked`,
+and `no_match_visible`. Structural gaps take precedence over candidate
+dispositions. Matches remain available when a gap blocks the result. An empty
+bounded inventory can report `no_match_visible` while visibility remains
+unverified. There is no creation permit or authoritative negative result.
+`identity_binding` and `coverage.visibility` always remain `unverified`, with
+`source_binding_unverified`, `visibility_unverified`, and
+`query_contract_unverified` gaps on every successful response.
+
+These representations define candidate matching only. Deployment evidence must
+still establish the authenticated source namespace, stable asset/rule identity,
+complete hash decoder and source-to-run relation, plus legacy case mapping,
+all-state query/page semantics and the connector principal's full relevant
+visibility. No source decoder, account visibility contract, backfill or write
+admission is established by this endpoint. An absent tag or unavailable record
+cannot certify that a finding has no case.
+
 ## Live smoke test
 
 ```bash
