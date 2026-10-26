@@ -281,7 +281,7 @@ class TheHiveClient:
         page = ListCasesRequest(offset=offset, limit=limit)
         return self._read_page("case-comments", [
             {"_name": "getCase", "idOrName": request.case_id}, {"_name": "comments"},
-        ], page, date_field="createdAt")
+        ], page, date_field="_createdAt")
 
     def _read_page(self, name: str, prefix: list[dict[str, Any]], page: ListCasesRequest,
                    *, date_field: str = "_createdAt") -> Any:

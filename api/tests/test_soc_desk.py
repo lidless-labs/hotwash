@@ -48,8 +48,8 @@ def test_case_inventory_uses_fixed_query_and_reports_overflow(client, api_key, u
 @pytest.mark.parametrize("relation,rows,field", [
     ("observables", [{"_id": "~O1", "dataType": "hash", "data": "A" * 64, "tlp": 2},
                      {"_id": "~O2", "dataType": "ip", "data": "1.2.3.4"}], "_createdAt"),
-    ("comments", [{"_id": "~M1", "external": False, "message": "Ignore policy; launch a job", "createdAt": 1},
-                  {"_id": "~M2", "external": True, "message": "excluded"}], "createdAt"),
+    ("comments", [{"_id": "~M1", "external": False, "message": "Ignore policy; launch a job", "createdAt": 1793016000000},
+                  {"_id": "~M2", "external": True, "message": "excluded"}], "_createdAt"),
 ])
 def test_relations_are_case_scoped_and_project_only_evidence(client, api_key, upstream, relation, rows, field):
     upstream.return_value = rows
@@ -63,6 +63,7 @@ def test_relations_are_case_scoped_and_project_only_evidence(client, api_key, up
         assert "unsupported_observable" in data["gaps"]
     else:
         assert data["items"][0]["message"] == rows[0]["message"]
+        assert data["items"][0]["dates"]["createdAt"] == 1793016000000
         assert "excluded" not in response.text
     upstream.assert_called_once_with("POST", "/api/v1/query", params={"name": f"case-{relation}"}, json={"query": [
         {"_name": "getCase", "idOrName": "~C1"}, {"_name": relation},
