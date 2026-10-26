@@ -140,8 +140,10 @@ Case inventory uses a fixed `listCase` query. Related lists use `getCase` with
 the validated `idOrName`, then `observables` or `comments`. The backend alone
 builds the sort and page expressions. Each list fetches `limit + 1` rows in one
 request. It never retries, polls or follows another page automatically. Sort is
-ascending creation time then `_id`. Comments use `createdAt`, other rows use
-`_createdAt`.
+ascending `_createdAt` then `_id` for all lists, including comments. Response
+timestamp projection is independent: fields such as `_createdAt` and `createdAt`
+are retained when present and valid. The corrected comment sort has local
+regression coverage. Deployed compatibility remains unverified.
 
 Every result includes `observed_at`, `coverage` and `gaps`. Pages include `items`,
 `returned`, `scanned`, `offset`, `limit`, `has_more` and `overflow`. The latter two

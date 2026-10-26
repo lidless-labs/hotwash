@@ -77,6 +77,8 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   back in line with the actual tree and ports.
 
 ### Fixed
+- Case-comment queries sort by `_createdAt`, avoiding an unsupported `createdAt`
+  sort property while preserving response timestamp evidence.
 - First-run playbook seeding no longer depends on a hardcoded OpenClaw
   workspace path; seeds ship under `api/seed_data/playbooks` and
   `HOTWASH_PLAYBOOK_SEED_DIR` overrides the source directory.
