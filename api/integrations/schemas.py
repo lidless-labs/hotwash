@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -150,3 +151,150 @@ class FindingCheckResponse(TheHiveReadRequest):
     coverage: FindingCoverage
     disposition: Literal["no_match_visible", "one_open_candidate", "closed_only", "ambiguous", "blocked"]
     gaps: list[FindingGap] = Field(max_length=18)
+
+
+ROOTCHECK_GROUP = "/dev/.lxc/proc"
+
+
+def validate_rootcheck_path(value: str) -> str:
+    """Validate a literal descendant, without normalizing its identity."""
+    if (len(value) > 2000 or not value.startswith(ROOTCHECK_GROUP + "/")
+            or any(unicodedata.category(c).startswith("C") or c in "\\'" for c in value)
+            or any(part in {"", ".", ".."} for part in value[len(ROOTCHECK_GROUP) + 1:].split("/"))):
+        raise ValueError("Invalid literal rootcheck path")
+    return value
+
+
+class RootcheckCandidate(TheHiveReadRequest):
+    source: Literal["wazuh"]
+    source_instance_ref: FindingId
+    agent_registration_ref: FindingId
+    agent_id: str = Field(strict=True, pattern=r"^[0-9]{1,128}$", max_length=128)
+    signature: Literal["hidden-file-on-dev-v1"]
+    scope: Literal["group", "path"]
+    subject: str = Field(strict=True, max_length=2000)
+
+    @field_validator("subject")
+    @classmethod
+    def literal_subject(cls, value: str, info) -> str:
+        if info.data.get("scope") == "group":
+            if value != ROOTCHECK_GROUP:
+                raise ValueError("Invalid rootcheck group")
+            return value
+        return validate_rootcheck_path(value)
+
+
+class RootcheckCheckRequest(RootcheckCandidate):
+    run_id: FindingRunId | None = None
+
+
+class RootcheckCaseMatch(FindingCaseMatch):
+    identity_basis: Literal["candidate_tag_v2"] = "candidate_tag_v2"
+
+
+class RootcheckRunMatch(FindingRunMatch):
+    identity_basis: Literal["untrusted_context_v2"] = "untrusted_context_v2"
+
+
+class RootcheckCoverage(FindingCoverage):
+    contract_version: Literal[2] = 2
+
+
+class RootcheckCheckResponse(TheHiveReadRequest):
+    schema_version: Literal[2] = 2
+    candidate_key: str = Field(pattern=r"^v2:[a-f0-9]{64}$")
+    candidate: RootcheckCandidate
+    identity_binding: Literal["unverified"] = "unverified"
+    case_matches: list[RootcheckCaseMatch] = Field(max_length=100)
+    run_matches: list[RootcheckRunMatch] = Field(max_length=100)
+    coverage: RootcheckCoverage
+    disposition: Literal["no_match_visible", "one_open_candidate", "closed_only", "ambiguous", "blocked"]
+    gaps: list[FindingGap] = Field(max_length=18)
+
+
+class _ReceiptStrict(TheHiveReadRequest):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class _RootcheckReceiptRequest(_ReceiptStrict):
+    agent_id: str = Field(pattern=r"^[0-9]{1,128}$", max_length=128)
+    status: str = Field(min_length=1, max_length=128)
+    limit: int = Field(ge=1, le=100)
+
+
+class _RootcheckReceiptPagination(_ReceiptStrict):
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    has_more: bool
+
+
+class RootcheckReceiptRow(_ReceiptStrict):
+    receipt_index: int = Field(ge=0, le=99)
+    source_record_id: None = None
+    status: str = Field(min_length=1, max_length=128)
+    path: str = Field(max_length=2000)
+    date_first: str = Field(min_length=1, max_length=128)
+    date_last: str = Field(min_length=1, max_length=128)
+
+
+class _RootcheckReceiptInputRow(_ReceiptStrict):
+    receipt_index: int = Field(ge=0, le=99)
+    source_record_id: None
+    status: str = Field(min_length=1, max_length=128)
+    source_signature_log: str
+    proc_paths: list[str] = Field(max_length=100)
+    date_first: str = Field(min_length=1, max_length=128)
+    date_last: str = Field(min_length=1, max_length=128)
+
+
+class _RootcheckReceiptInput(_ReceiptStrict):
+    mode: Literal["historical_cached_receipt_recovery"]
+    recovered_at: str = Field(min_length=1, max_length=128)
+    source_session: str = Field(min_length=1, max_length=256)
+    cache_offset: int = Field(ge=0)
+    tool_name: str = Field(min_length=1, max_length=256)
+    tool_call_id: str = Field(min_length=1, max_length=256)
+    request: _RootcheckReceiptRequest
+    request_observed_at: str = Field(min_length=1, max_length=128)
+    result_observed_at: str = Field(min_length=1, max_length=128)
+    result_is_error: bool
+    total: int = Field(ge=0)
+    returned: int = Field(ge=0)
+    proc_path_records: int = Field(ge=0)
+    other_records: int = Field(ge=0)
+    pagination: _RootcheckReceiptPagination
+    output_metadata: dict[str, str]
+    source_payload_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    records: list[_RootcheckReceiptInputRow] = Field(max_length=100)
+    exact_proc_paths: list[str] = Field(max_length=100)
+    limits: list[str]
+    new_soc_calls: Literal[0]
+
+
+class RootcheckReceiptProjection(TheHiveReadRequest):
+    schema_version: Literal[2] = 2
+    disposition: Literal["projected", "receipt_invalid", "receipt_capped", "receipt_inconsistent"]
+    provenance: Literal["historical_cached_receipt_recovery"] = "historical_cached_receipt_recovery"
+    source_binding: Literal["unverified"] = "unverified"
+    gaps: tuple[Literal["source_binding_unverified"], Literal["visibility_unverified"],
+                Literal["query_contract_unverified"]] = (
+                    "source_binding_unverified", "visibility_unverified", "query_contract_unverified",
+                )
+    source_session: str | None = None
+    cache_offset: int | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    request: _RootcheckReceiptRequest | None = None
+    request_observed_at: str | None = None
+    result_observed_at: str | None = None
+    recovered_at: str | None = None
+    result_is_error: bool | None = None
+    total: int | None = None
+    returned: int | None = None
+    pagination: _RootcheckReceiptPagination | None = None
+    source_payload_sha256: str | None = None
+    rows: list[RootcheckReceiptRow] = Field(default_factory=list, max_length=100)
+    exact_proc_paths: list[str] = Field(default_factory=list, max_length=100)
+    other_records: int = Field(default=0, ge=0, le=100)
+    other_receipt_indexes: list[int] = Field(default_factory=list, max_length=100)

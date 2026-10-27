@@ -478,3 +478,379 @@ def test_transport_failure_and_integration_gates_are_finite(client, api_key, ups
             db.commit()
         assert read(client, api_key).status_code == 400
         upstream.assert_not_called()
+
+
+# v2 fixtures are portable synthetic observations, independent of source receipts.
+ROOTCHECK = {"source": "wazuh", "source_instance_ref": "synthetic-a",
+             "agent_registration_ref": "registration-a", "agent_id": "022",
+             "signature": "hidden-file-on-dev-v1", "scope": "group", "subject": "/dev/.lxc/proc"}
+ROOTCHECK_URL = "/api/integrations/thehive/finding-check/rootcheck-v2"
+
+
+def rootcheck_read(client, api_key, **changes):
+    return client.get(ROOTCHECK_URL, params={**ROOTCHECK, **changes}, headers={"X-API-Key": api_key})
+
+
+def rootcheck_key(**changes):
+    from api.integrations import schemas
+    from api.services import soc_cases
+    return soc_cases.rootcheck_candidate_key(schemas.RootcheckCandidate(**{**ROOTCHECK, **changes}))
+
+
+def rootcheck_tag(**changes):
+    return "hotwash:rootcheck:v2:" + changes.get("scope", "group") + ":" + rootcheck_key(**changes)[3:]
+
+
+def rootcheck_context(**changes):
+    return {"soc_rootcheck_v2": {**ROOTCHECK, "case_id": "~C1", **changes}}
+
+
+def receipt_payload(paths=("/dev/.lxc/proc/7/status",), other=True):
+    rows = [{"receipt_index": i, "source_record_id": None, "status": "outstanding",
+             "source_signature_log": "<untrusted_siem_data>File '" + path +
+             "' present on /dev. Possible hidden file.</untrusted_siem_data>",
+             "proc_paths": [path], "date_first": "2026-01-01T00:00:00Z",
+             "date_last": "2026-01-02T00:00:00Z"} for i, path in enumerate(paths)]
+    if other:
+        rows.append({"receipt_index": len(rows), "source_record_id": None, "status": "outstanding",
+                     "source_signature_log": "<untrusted_siem_data>Unrelated synthetic observation.</untrusted_siem_data>",
+                     "proc_paths": [], "date_first": "2026-01-01T00:00:00Z", "date_last": "2026-01-02T00:00:00Z"})
+    return {"mode": "historical_cached_receipt_recovery", "recovered_at": "2026-01-03T00:00:00Z",
+            "source_session": "synthetic-session", "cache_offset": 0, "tool_name": "synthetic_rootcheck",
+            "tool_call_id": "synthetic-call", "request": {"agent_id": "022", "status": "outstanding", "limit": 100},
+            "request_observed_at": "2026-01-02T00:00:00Z", "result_observed_at": "2026-01-02T00:00:01Z",
+            "result_is_error": False, "total": len(rows), "returned": len(rows),
+            "proc_path_records": len(paths), "other_records": int(other),
+            "pagination": {"total": len(rows), "limit": 100, "offset": 0, "has_more": False},
+            "output_metadata": {"untrusted_data_note": "Synthetic untrusted data"},
+            "source_payload_sha256": "a" * 64, "records": rows, "exact_proc_paths": sorted(set(paths)),
+            "limits": ["historical only"], "new_soc_calls": 0}
+
+
+def project_receipt(payload):
+    from api.services import soc_cases
+    return soc_cases.project_rootcheck_receipt(payload).model_dump(mode="json")
+
+
+def test_rootcheck_route_is_separate_candidate_read(client, api_key, upstream, temp_db):
+    statements = []
+    engine = temp_db.kw["bind"]
+    def capture(conn, cursor, statement, parameters, ctx, many):
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = rootcheck_read(client, api_key)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["schema_version"] == data["coverage"]["contract_version"] == 2
+    assert data["candidate"] == ROOTCHECK and data["candidate_key"].startswith("v2:")
+    assert data["disposition"] == "no_match_visible"
+    assert set(data["gaps"]) == BASE_GAPS
+    assert data["identity_binding"] == data["coverage"]["visibility"] == "unverified"
+    assert not {"permit_create", "authoritative", "safe_to_create"} & data.keys()
+    assert not any(s.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for s in statements)
+    upstream.assert_called_once()
+
+
+def test_rootcheck_exact_tuple_and_receipt_membership_independence():
+    import hashlib
+    expected = hashlib.sha256(b'["hotwash-rootcheck",2,"wazuh","synthetic-a","registration-a","022","hidden-file-on-dev-v1","group","/dev/.lxc/proc"]').hexdigest()
+    key = rootcheck_key()
+    assert key == "v2:" + expected
+    for changes in ({"agent_id": "22"}, {"source_instance_ref": "synthetic-b"},
+                    {"agent_registration_ref": "registration-b"},
+                    {"scope": "path", "subject": "/dev/.lxc/proc/7/status"}):
+        assert rootcheck_key(**changes) != key
+    a = project_receipt(receipt_payload())
+    b = project_receipt(receipt_payload(("/dev/.lxc/proc/8/status",)))
+    assert a["exact_proc_paths"] != b["exact_proc_paths"]
+    assert rootcheck_key() == key  # Membership is not an identity input.
+
+
+@pytest.mark.parametrize("changes", [
+    {"agent_id": 22}, {"agent_id": "022 "}, {"agent_id": "٢٢"}, {"agent_id": ""},
+    {"agent_id": "1" * 129}, {"source_instance_ref": " synthetic-a"},
+    {"agent_registration_ref": "https://example.invalid"}, {"source": "WAZUH"},
+    {"signature": "other"}, {"subject": "/dev/.lxc/proc/"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/../status"},
+    {"scope": "path", "subject": "/dev/.lxc/proc//status"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/./status"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/a\\b"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/a\n"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/a'b"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/a\u200eb"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/a\ud800b"},
+    {"scope": "path", "subject": "/dev/.lxc/proc/" + "a" * 2000},
+    {"scope": "path", "subject": " /dev/.lxc/proc/a"}, {"scope": "other"},
+    {"sha256": "a" * 64}, {"rule_id": "1"}, {"run_id": "01"}, {"run_id": "+1"},
+    {"run_id": "9223372036854775808"}, {"receipt_url": "https://example.invalid"},
+])
+def test_rootcheck_schema_and_query_reject_exactness_violations(client, api_key, upstream, changes):
+    from api.integrations import schemas
+    from pydantic import ValidationError
+    # Direct schema proves no integer coercion that query strings cannot expose.
+    with pytest.raises(ValidationError):
+        schemas.RootcheckCheckRequest(**{**ROOTCHECK, **changes})
+    if changes == {"agent_id": 22} or "\ud800" in changes.get("subject", ""):
+        return
+    response = rootcheck_read(client, api_key, **changes)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid rootcheck check parameters"}
+    upstream.assert_not_called()
+
+
+def test_rootcheck_missing_duplicate_auth_and_run_before_transport(client, api_key, upstream, runs):
+    assert client.get(ROOTCHECK_URL, params=ROOTCHECK).status_code == 401
+    for field in ROOTCHECK:
+        missing = {k: v for k, v in ROOTCHECK.items() if k != field}
+        assert client.get(ROOTCHECK_URL, params=missing, headers={"X-API-Key": api_key}).status_code == 422
+        assert client.get(ROOTCHECK_URL, params=list(ROOTCHECK.items()) + [(field, ROOTCHECK[field])],
+                          headers={"X-API-Key": api_key}).status_code == 422
+    assert rootcheck_read(client, api_key, run_id="1").status_code == 404
+    upstream.assert_not_called()
+    ids = runs([rootcheck_context()] * 101, ["completed"] * 100 + ["abandoned"])
+    data = rootcheck_read(client, api_key, run_id=str(ids[-1])).json()
+    assert [r["run_id"] for r in data["run_matches"]] == ids[:100]
+    assert data["disposition"] == "blocked" and "runs_capped" in data["gaps"]
+
+
+@pytest.mark.parametrize("status,stage,expected,gap", [
+    ("New", "Open", "one_open_candidate", None),
+    ("InProgress", None, "one_open_candidate", None),
+    ("Resolved", "Closed", "closed_only", None), ("Deleted", None, "closed_only", None),
+    ("New", "Closed", "ambiguous", "case_lifecycle_conflict"),
+    ("unknown", None, "blocked", "case_lifecycle_unknown"),
+])
+def test_rootcheck_lifecycles_remain_candidate_only(client, api_key, upstream, status, stage, expected, gap):
+    row = {"_id": "~C1", "status": status, "tags": [rootcheck_tag()]}
+    if stage is not None:
+        row["stage"] = stage
+    upstream.return_value = [row]
+    data = rootcheck_read(client, api_key).json()
+    assert data["disposition"] == expected
+    assert data["case_matches"][0]["identity_basis"] == "candidate_tag_v2"
+    assert BASE_GAPS <= set(data["gaps"])
+    if gap:
+        assert gap in data["gaps"]
+
+
+def test_rootcheck_multiple_raw_tags_legacy_crossscope_and_sentinel(client, api_key, upstream):
+    tag = rootcheck_tag()
+    for tags, disposition in ([TAG], "blocked"), ([rootcheck_tag(scope="path", subject="/dev/.lxc/proc/7/status")], "blocked"), \
+                             (["unassociated"], "blocked"), ([tag, rootcheck_tag(agent_id="22")], "ambiguous"), \
+                             ([tag, "hotwash:rootcheck:v2:group:invalid"], "blocked"):
+        upstream.return_value = [{"_id": "~C1", "status": "New", "tags": ["x"] * 150 + tags}]
+        assert rootcheck_read(client, api_key).json()["disposition"] == disposition
+    upstream.return_value = [{"_id": "~C1", "status": "Resolved", "tags": [tag]},
+                             {"_id": "~C2", "status": "Deleted", "tags": [tag]}]
+    assert rootcheck_read(client, api_key).json()["disposition"] == "ambiguous"
+    upstream.return_value = [{"_id": f"~C{i}", "status": "Resolved", "tags": [rootcheck_tag(agent_id="22")]}
+                             for i in range(100)] + [{"_id": "~Sentinel", "status": "New", "tags": [tag]}]
+    data = rootcheck_read(client, api_key).json()
+    assert data["case_matches"] == [] and data["disposition"] == "blocked"
+    assert "cases_capped" in data["gaps"]
+
+
+@pytest.mark.parametrize("record,gap", [
+    ({}, "run_identity_unmapped"), (context(), "run_identity_unmapped"),
+    (rootcheck_context(authoritative=True), "run_identity_unmapped"),
+    (rootcheck_context(scope="path", subject="/dev/.lxc/proc/7/status"), "run_identity_unmapped"),
+    (rootcheck_context(case_id="~Other"), "run_case_link_unresolved"),
+    (rootcheck_context(case_id=None), "run_case_link_missing"),
+    (rootcheck_context(agent_registration_ref="registration-b"), "run_case_link_conflict"),
+    ('{"soc_rootcheck_v2":{},"soc_rootcheck_v2":{}}', "run_context_invalid"),
+    ("x" * 65537, "run_context_oversized"),
+])
+def test_rootcheck_untrusted_runs_block_absence(client, api_key, upstream, runs, record, gap):
+    runs([record], ["abandoned"])
+    upstream.return_value = [{"_id": "~C1", "status": "New", "tags": [rootcheck_tag()]}]
+    data = rootcheck_read(client, api_key).json()
+    assert data["disposition"] == "blocked" and gap in data["gaps"]
+
+
+def test_rootcheck_matching_run_all_states_and_no_authority(client, api_key, upstream, runs):
+    ids = runs([rootcheck_context()] * 4, ["active", "completed", "abandoned", "unknown"])
+    upstream.return_value = [{"_id": "~C1", "status": "New", "tags": [rootcheck_tag()]}]
+    data = rootcheck_read(client, api_key).json()
+    assert [r["run_id"] for r in data["run_matches"]] == ids
+    assert all(r["attempt_state"] is None and r["identity_basis"] == "untrusted_context_v2" for r in data["run_matches"])
+    assert data["disposition"] == "blocked" and "run_attempt_state_unverified" in data["gaps"]
+
+
+def test_rootcheck_sole_connection_released_and_errors_sanitized(client, api_key, upstream, runs, temp_db, monkeypatch):
+    from api import database
+    from api.integrations.clients.thehive import TheHiveError
+    ids = runs([rootcheck_context()])
+    engine = create_engine(temp_db.kw["bind"].url, connect_args={"check_same_thread": False},
+                           poolclass=QueuePool, pool_size=1, max_overflow=0, pool_timeout=0)
+    temp_db.configure(bind=engine)
+    monkeypatch.setattr(database, "engine", engine)
+    def outbound(*args, **kwargs):
+        assert engine.pool.checkedout() == 0
+        with engine.connect() as connection:
+            assert not connection.connection.driver_connection.in_transaction
+            assert connection.execute(select(Execution.id)).scalars().all() == ids
+        raise TheHiveError("secret upstream details")
+    upstream.side_effect = outbound
+    try:
+        response = rootcheck_read(client, api_key, run_id=str(ids[0]))
+        assert response.status_code == 502 and response.json() == {"detail": {"message": "TheHive read failed"}}
+        assert engine.pool.checkedout() == 0
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("flushed", [False, True])
+def test_rootcheck_preserves_caller_owned_session(temp_db, runs, flushed):
+    from api.services import soc_cases
+    from api.integrations import schemas
+    ids = runs([rootcheck_context()])
+    with temp_db() as caller:
+        caller.connection().exec_driver_sql("BEGIN")
+        row = caller.get(Execution, ids[0])
+        row.status = "abandoned"
+        pending = Playbook(title="Uncommitted rootcheck owner")
+        caller.add(pending)
+        if flushed:
+            caller.flush()
+        with patch.object(TheHiveClient, "list_cases", return_value=[]) as transport:
+            data = soc_cases.check_rootcheck(caller, TheHiveClient(base_url="http://thehive.test", api_key="fake"),
+                                             schemas.RootcheckCheckRequest(**ROOTCHECK, run_id=ids[0]))
+        assert caller.connection().connection.driver_connection.in_transaction
+        assert pending in caller and row.status == "abandoned"
+        if not flushed:
+            assert pending in caller.new and pending.id is None and row in caller.dirty
+        with temp_db() as observer:
+            assert observer.get(Execution, ids[0]).status == "active"
+            assert observer.execute(select(Playbook.id).where(Playbook.title == pending.title)).first() is None
+        assert [r.run_id for r in data.run_matches] == ids
+        transport.assert_called_once_with(offset=0, limit=100)
+        caller.rollback()
+
+
+def test_rootcheck_projection_retains_rows_not_logs_and_one_pass_entities():
+    paths = ("/dev/.lxc/proc/7/a&amp;lt;b", "/dev/.lxc/proc/7/a&amp;lt;b")
+    payload = receipt_payload(paths)
+    # Documented entities decode once: &amp;lt; becomes literal &lt;.
+    for row in payload["records"][:2]:
+        row["proc_paths"] = ["/dev/.lxc/proc/7/a&lt;b"]
+    payload["exact_proc_paths"] = ["/dev/.lxc/proc/7/a&lt;b"]
+    result = project_receipt(payload)
+    assert result["disposition"] == "projected"
+    assert result["exact_proc_paths"] == payload["exact_proc_paths"]
+    assert [r["path"] for r in result["rows"]] == payload["exact_proc_paths"] * 2
+    assert [r["receipt_index"] for r in result["rows"]] == [0, 1]
+    assert all(r["source_record_id"] is None for r in result["rows"])
+    assert result["other_records"] == 1 and result["other_receipt_indexes"] == [2]
+    assert result["provenance"] == "historical_cached_receipt_recovery"
+    assert result["source_binding"] == "unverified"
+    for name in ("tool_name", "tool_call_id", "request", "request_observed_at", "result_observed_at",
+                 "recovered_at", "result_is_error", "total", "returned", "pagination", "source_payload_sha256"):
+        assert result[name] == payload[name]
+    assert "source_signature_log" not in json.dumps(result) and "result_id" not in result
+
+
+@pytest.mark.parametrize("log", [
+    "File '/dev/.lxc/proc/a' present on /dev. Possible hidden file.",
+    "<untrusted_siem_data> File '/dev/.lxc/proc/a' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/a' present on /dev. Possible hidden file. extra</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/../a' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/a\\b' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/a\x00b' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/a\nb' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/a'b' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc//a' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/./a' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data>File '/dev/.lxc/proc/' present on /dev. Possible hidden file.</untrusted_siem_data>",
+    "<untrusted_siem_data><untrusted_siem_data>File '/dev/.lxc/proc/a' present on /dev. Possible hidden file.</untrusted_siem_data></untrusted_siem_data>",
+])
+def test_rootcheck_projection_rejects_hostile_or_ambiguous_logs_atomically(log):
+    payload = receipt_payload()
+    payload["records"][0]["source_signature_log"] = log
+    result = project_receipt(payload)
+    assert result["disposition"] == "receipt_invalid"
+    assert result["rows"] == result["exact_proc_paths"] == result["other_receipt_indexes"] == []
+
+
+@pytest.mark.parametrize("mutation,expected", [
+    (lambda p: p.update(total=101), "receipt_capped"),
+    (lambda p: p["pagination"].update(has_more=True), "receipt_capped"),
+    (lambda p: p.update(returned=1), "receipt_inconsistent"),
+    (lambda p: p.update(exact_proc_paths=["/dev/.lxc/proc/forged"]), "receipt_inconsistent"),
+    (lambda p: p["records"][0].update(proc_paths=["/dev/.lxc/proc/forged"]), "receipt_inconsistent"),
+    (lambda p: p["records"][0].update(source_record_id="invented"), "receipt_invalid"),
+    (lambda p: p["records"][0].update(receipt_index=9), "receipt_inconsistent"),
+    (lambda p: p.update(result_is_error=True), "receipt_invalid"),
+    (lambda p: p.update(proc_path_records=0), "receipt_inconsistent"),
+    (lambda p: p.update(other_records=0), "receipt_inconsistent"),
+    (lambda p: p["pagination"].update(offset=1), "receipt_capped"),
+    (lambda p: p.update(limits=["x" * 1048576]), "receipt_capped"),
+    (lambda p: p["records"][0].update(source_signature_log="x" * 8193), "receipt_capped"),
+    (lambda p: p.update(records=p["records"] * 51), "receipt_capped"),
+    (lambda p: p.update(records="malformed"), "receipt_invalid"),
+])
+def test_rootcheck_projection_bounds_and_inconsistency_never_return_subset(mutation, expected):
+    payload = receipt_payload()
+    mutation(payload)
+    result = project_receipt(payload)
+    assert result["disposition"] == expected
+    assert result["rows"] == result["exact_proc_paths"] == result["other_receipt_indexes"] == []
+
+
+@pytest.mark.parametrize("outcome", ["projected", "receipt_invalid", "receipt_capped", "receipt_inconsistent"])
+def test_rootcheck_projection_mandatory_gaps_on_every_outcome(outcome):
+    payload = receipt_payload()
+    if outcome == "receipt_invalid":
+        payload["result_is_error"] = True
+    elif outcome == "receipt_capped":
+        payload["pagination"]["has_more"] = True
+    elif outcome == "receipt_inconsistent":
+        payload["returned"] = 0
+    result = project_receipt(payload)
+    assert result["disposition"] == outcome
+    assert set(result["gaps"]) == BASE_GAPS
+    assert result["source_binding"] == "unverified"
+
+
+@pytest.mark.parametrize("field", ["request_observed_at", "result_observed_at", "recovered_at", "date_first", "date_last"])
+@pytest.mark.parametrize("value", ["", "not-a-date", "2026-02-30T00:00:00Z", "2026-01-01", "2026-01-01T00:00:00"])
+def test_rootcheck_projection_rejects_malformed_or_naive_times(field, value):
+    payload = receipt_payload()
+    if field.startswith("date_"):
+        payload["records"][0][field] = value
+    else:
+        payload[field] = value
+    result = project_receipt(payload)
+    assert result["disposition"] == "receipt_invalid"
+    assert result["rows"] == result["exact_proc_paths"] == result["other_receipt_indexes"] == []
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda p: p.update(request_observed_at="2026-01-02T00:00:02Z"),
+    lambda p: p.update(recovered_at="2026-01-01T00:00:00Z"),
+    lambda p: p["records"][0].update(date_first="2026-01-02T00:00:01Z"),
+    lambda p: p["records"][0].update(date_last="2026-01-02T00:00:02Z"),
+    lambda p: p["records"][-1].update(date_first="2026-01-03T00:00:00Z"),
+    lambda p: p["records"][0].update(status="resolved"),
+])
+def test_rootcheck_projection_rejects_impossible_chronology_or_status(mutation):
+    payload = receipt_payload()
+    mutation(payload)
+    result = project_receipt(payload)
+    assert result["disposition"] == "receipt_inconsistent"
+    assert result["rows"] == result["exact_proc_paths"] == result["other_receipt_indexes"] == []
+
+
+def test_rootcheck_projection_preserves_exact_aware_time_strings():
+    payload = receipt_payload()
+    payload.update(request_observed_at="2026-01-02T01:00:00.123456+01:00",
+                   result_observed_at="2026-01-02T01:00:01.123456+01:00",
+                   recovered_at="2026-01-03T00:00:00.000000+00:00")
+    result = project_receipt(payload)
+    assert result["disposition"] == "projected"
+    for name in ("request_observed_at", "result_observed_at", "recovered_at"):
+        assert result[name] == payload[name]
+    for name in ("date_first", "date_last"):
+        assert result["rows"][0][name] == payload["records"][0][name]
