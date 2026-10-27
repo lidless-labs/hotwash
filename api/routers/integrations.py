@@ -493,7 +493,10 @@ def thehive_finding_check(request: Request, db: Session = Depends(get_db)):
         candidate = FindingCheckRequest.model_validate(query)
     except (ValidationError, ValueError):
         raise HTTPException(status_code=422, detail="Invalid finding check parameters") from None
-    integration = _get_integration(db, "thehive")
+    # Detach the loaded config and return its connection before DNS/transport
+    # or the separately owned run snapshot. Leave the caller Session untouched.
+    with Session(bind=db.get_bind().engine) as config_db:
+        integration = _get_integration(config_db, "thehive")
     client = _build_thehive_client(integration)
     try:
         return check_finding(db, client, candidate)
