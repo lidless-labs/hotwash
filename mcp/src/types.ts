@@ -120,6 +120,45 @@ export interface ReadMetadata {
   gaps: string[];
 }
 
+export interface FindingCandidate {
+  source: "wazuh";
+  source_instance_ref: string;
+  asset_id: string;
+  rule_id: string;
+  sha256: string;
+}
+
+export interface FindingCheckRequest extends FindingCandidate {
+  // MCP accepts only positive safe JS integers, narrower than backend int64.
+  // Larger IDs must be rejected, never rounded or coerced through a string.
+  run_id?: number;
+}
+
+export type FindingGap =
+  | "source_binding_unverified" | "visibility_unverified" | "query_contract_unverified"
+  | "cases_capped" | "case_record_invalid" | "case_identity_unmapped" | "case_identity_invalid"
+  | "case_identity_conflict" | "case_lifecycle_unknown" | "case_lifecycle_conflict"
+  | "runs_capped" | "run_context_invalid" | "run_context_oversized" | "run_identity_unmapped"
+  | "run_case_link_missing" | "run_case_link_unresolved" | "run_case_link_conflict" | "run_attempt_state_unverified";
+
+export interface FindingCheckResponse {
+  schema_version: 1;
+  fingerprint: string;
+  candidate: FindingCandidate;
+  identity_binding: "unverified";
+  case_matches: { case_id: string; lifecycle: "open" | "closed" | "unknown"; identity_basis: "fingerprint_tag_v1" }[];
+  run_matches: { run_id: number; case_id: string | null; identity_basis: "untrusted_context_v1"; attempt_state: null }[];
+  coverage: {
+    cases: "incomplete" | "unverified";
+    runs: "complete" | "incomplete" | "unverified";
+    visibility: "unverified";
+    observed_at: string;
+    contract_version: 1;
+  };
+  disposition: "no_match_visible" | "one_open_candidate" | "closed_only" | "ambiguous" | "blocked";
+  gaps: FindingGap[];
+}
+
 export interface ReadPage<T> extends ReadMetadata {
   items: T[];
   returned: number;
