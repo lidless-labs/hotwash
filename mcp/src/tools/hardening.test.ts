@@ -95,7 +95,7 @@ test("every tool declares all four annotation hints, matching its behavior", asy
   const byName = new Map(tools.map((tool) => [tool.name, tool.annotations]));
   const readOnly = ["hotwash_list_playbooks", "hotwash_get_playbook", "hotwash_query_run", "hotwash_list_suggestions",
     "hotwash_list_runs", "hotwash_get_run_report", "hotwash_list_cases", "hotwash_get_case",
-    "hotwash_list_case_observables", "hotwash_list_case_comments", "hotwash_get_analyzer_job"];
+    "hotwash_list_case_observables", "hotwash_list_case_comments", "hotwash_get_analyzer_job", "hotwash_check_finding"];
   const mutating = ["hotwash_start_run", "hotwash_advance_step", "hotwash_cancel_run", "hotwash_attach_artifact", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion"];
   assert.deepEqual([...byName.keys()].sort(), [...readOnly, ...mutating].sort());
   for (const [name, hints] of byName) {

@@ -17,6 +17,8 @@ import type {
   CommentEvidence,
   AnalyzerJobEvidence,
   RunReport,
+  FindingCheckRequest,
+  FindingCheckResponse,
 } from "./types.js";
 
 const MAX_REDIRECTS = 3;
@@ -185,6 +187,35 @@ export class HotwashClient {
 
   getRunReport(executionId: number): Promise<RunReport> {
     return this.evidenceRead(`/api/executions/${executionId}/report`);
+  }
+
+  async checkFinding(candidate: FindingCheckRequest): Promise<FindingCheckResponse> {
+    const params = new URLSearchParams({
+      source: candidate.source,
+      source_instance_ref: candidate.source_instance_ref,
+      asset_id: candidate.asset_id,
+      rule_id: candidate.rule_id,
+      sha256: candidate.sha256,
+    });
+    if (candidate.run_id !== undefined) params.set("run_id", String(candidate.run_id));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      // This fixed read never follows even a same-origin redirect. Keep legacy
+      // request/redirect behavior unchanged for the other client methods.
+      const response = await fetch(`${this.baseUrl}/api/integrations/thehive/finding-check?${params}`, {
+        method: "GET", headers: this.headers(), signal: controller.signal, redirect: "manual",
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error("Finding check unavailable");
+      }
+      return JSON.parse(await readBodyLimited(response, this.maxResponseBytes)) as FindingCheckResponse;
+    } catch {
+      throw new Error("Hotwash read failed; finding check unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   listCases(page: { offset?: number; limit?: number } = {}): Promise<ReadPage<CaseEvidence>> {
