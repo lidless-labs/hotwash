@@ -16,7 +16,7 @@ const page = {
 const findingId = z.string().max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?![\s\S])/);
 const findingHash = z.string().length(64).regex(/^[a-fA-F0-9]{64}(?![\s\S])/);
 const findingRunId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
-  .describe("Positive integer at most 9007199254740991. MCP rejects larger backend int64 IDs; it never rounds them.");
+  .describe("Positive integer at most 9007199254740991. MCP rejects larger backend int64 IDs. It never rounds them. Validates that the referenced run exists. It does not narrow the bounded run scan or returned matches.");
 const findingCandidate = z.object({
   source: z.literal("wazuh"), source_instance_ref: findingId, asset_id: findingId, rule_id: findingId,
   sha256: z.string().regex(/^[a-f0-9]{64}(?![\s\S])/),
@@ -179,7 +179,7 @@ function readJob(source: unknown, requestedId: string) {
 
 export function registerSocTools(server: McpServer, client: HotwashClient): void {
   server.registerTool("hotwash_check_finding", {
-    description: "Read one bounded Wazuh SHA-256 finding candidate check through the configured TheHive integration. Identity and visibility remain unverified, including empty inventories and complete local run scans. No creation permit, mutation, paging or retries. Optional run_id must be a positive safe integer at most 9007199254740991; larger backend int64 IDs are rejected, never rounded.",
+    description: "Read one bounded Wazuh SHA-256 finding candidate check through the configured TheHive integration. Identity and visibility remain unverified, including empty inventories and complete local run scans. No creation permit, mutation, paging or retries. Optional run_id validates that the referenced run exists. It does not narrow the bounded run scan or returned matches. It must be a positive safe integer at most 9007199254740991. Larger backend int64 IDs are rejected, never rounded.",
     inputSchema: findingInput, annotations: READ_ONLY_TOOL,
   }, async args => {
     try { return readResult({ ...readFinding(await client.checkFinding(args), args) }); }
