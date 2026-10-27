@@ -306,6 +306,133 @@ visibility. No source decoder, account visibility contract, backfill or write
 admission is established by this endpoint. An absent tag or unavailable record
 cannot certify that a finding has no case.
 
+## Rootcheck v2 candidate read
+
+`GET /api/integrations/thehive/finding-check/rootcheck-v2` is a separate,
+authenticated, read-only candidate lookup. The v1 endpoint and its fingerprint
+format remain unchanged. All of these query fields are required:
+
+| Field | Contract |
+| --- | --- |
+| `source` | Exactly `wazuh` |
+| `source_instance_ref` | Existing `FindingId` bounds: exactly `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`, at most 128 characters |
+| `agent_registration_ref` | The same bounds, identifying one registration within that source instance |
+| `agent_id` | Exactly 1 to 128 ASCII digits, preserving leading zeros such as `022` |
+| `signature` | Exactly `hidden-file-on-dev-v1`, the fixed parser contract label |
+| `scope` | Exactly `group` or `path` |
+| `subject` | Group: exactly `/dev/.lxc/proc`. Path: one literal descendant |
+
+A path has at most 2,000 characters. Empty, dot and dot-dot components, Unicode
+control characters, backslashes and single quotes are rejected. Paths and agent
+IDs are never stripped, resolved, case folded or coerced. Duplicate query keys
+and extra fields are rejected. Optional `run_id` has the v1 canonical positive
+integer bounds and must exist before the upstream inventory request. A run ID
+does not narrow the scan. Missing references return `422` before transport.
+The route uses the existing enabled, credential and mock-mode gates, pinned
+client, short config session and sanitized upstream errors.
+
+The candidate key is `v2:` plus the lowercase SHA-256 hex digest of this exact
+UTF-8 compact JSON array, with no spaces between elements and no ASCII escaping:
+
+```text
+["hotwash-rootcheck",2,"wazuh",source_instance_ref,agent_registration_ref,agent_id,"hidden-file-on-dev-v1",scope,subject]
+```
+
+This digest identifies a scoped lookup candidate. It is neither a binary hash
+nor an authenticated source-record ID. A new source instance, agent registration,
+agent ID, scope or subject changes the key. Reenrollment must use its own reviewed
+registration reference. Hostnames, agent numbers and tool call IDs cannot supply
+that binding. The group key excludes member paths, dates and receipt digests.
+Keep each receipt's exact sorted membership separately. Added or absent members
+are differences between observations. Absence from an outstanding-only receipt
+does not prove resolution, and an earlier assessment does not cover added paths.
+
+Case hints use the exact marker
+`hotwash:rootcheck:v2:<group|path>:<digest>`. Run hints use a
+`context_json.soc_rootcheck_v2` object containing exactly the candidate fields
+above and optional `case_id`. Both hints are untrusted. Case matches report
+`identity_basis: "candidate_tag_v2"`, and run matches report
+`identity_basis: "untrusted_context_v2"` with `attempt_state: null`.
+
+The lookup reuses the bounded all-state inventory and lifecycle rules described
+for v1: one 100-case request with a 101st sentinel and one all-status local run
+snapshot with a 101st sentinel. The config lookup and separately owned snapshot
+release their connections before transport, preserving caller session work.
+Legacy, v1, cross-granularity and unassociated hints remain unmapped. Conflicting,
+malformed, capped or unknown-attempt evidence blocks an absence claim. Multiple
+matches remain ambiguous. Closed-only candidates return `closed_only` without
+reopening or replacing a case. Raw tags are examined before any display limits.
+
+Responses use `schema_version: 2`, `coverage.contract_version: 2`, `candidate_key`,
+`candidate`, safe matches and the existing dispositions. Every result retains
+`source_binding_unverified`, `visibility_unverified` and
+`query_contract_unverified`. Identity binding and visibility remain `unverified`.
+`no_match_visible` describes only the absence of an exact visible candidate in
+these inventories. It grants no permission to create. The operation performs no
+source fetch, attachment, commit or upstream write.
+
+### Offline receipt projection
+
+`project_rootcheck_receipt(payload)` accepts an already-loaded recovery object.
+It accepts no filesystem path or URL and has no HTTP import or upload route.
+Input is limited to 1 MiB measured as compact UTF-8 JSON, 100 receipt rows and
+8 KiB of UTF-8 per log. The recovery envelope uses these required fields:
+
+- `mode: "historical_cached_receipt_recovery"`, `recovered_at`, `source_session`,
+  `cache_offset`, `tool_name` and `tool_call_id`
+- Exact `request: {agent_id, status, limit}`, `request_observed_at`,
+  `result_observed_at`, `result_is_error`, `total`, `returned` and
+  `pagination: {total, limit, offset, has_more}`
+- `source_payload_sha256`, `output_metadata`, `limits`, `new_soc_calls: 0`,
+  `proc_path_records`, `other_records`, `records` and `exact_proc_paths`
+
+Each row contains `receipt_index`, `source_record_id: null`, `status`,
+`source_signature_log`, `proc_paths`, `date_first` and `date_last`. Indexes must
+be contiguous from zero and identify only positions in this receipt. Derived
+row paths, aggregate unique paths and row counts are checked against the logs.
+Source record IDs are never fabricated. Unknown envelope or row fields fail
+validation. Metadata and logs remain untrusted input.
+
+Only the exact `<untrusted_siem_data>...</untrusted_siem_data>` wrapper is removed.
+The documented `&amp;`, `&lt;` and `&gt;` entities are decoded once. The group
+parser then requires this full-string template:
+
+```text
+File '<PATH>' present on /dev. Possible hidden file.
+```
+
+It extracts one literal descendant using the same path rules as the candidate.
+Extra syntax, nested wrappers and ambiguous quoting fail validation. Non-group
+observations remain separately counted with their receipt indexes. Duplicates
+remain separate evidence rows while membership contains unique sorted paths.
+The projection returns selected group rows with receipt index, null source ID,
+status, path and original first/last date strings. It never returns logs.
+
+Times must be valid timezone-aware ISO timestamps with a `T` separator, seconds,
+optional 1 to 6 fractional digits and either `Z` or an explicit `HH:MM` offset.
+The original strings are preserved. Request observation must precede or equal
+result observation, which must precede or equal recovery. Each row's first date
+must precede or equal its last date, which cannot exceed result observation.
+For an `outstanding` request, every row must have `outstanding` status. These
+checks apply to non-group rows too.
+
+A failed projection returns `receipt_invalid`, `receipt_capped` or
+`receipt_inconsistent` with empty rows, membership and non-group references.
+It never returns a complete-looking subset. Every projection outcome includes
+`source_binding: "unverified"` and the same mandatory three gaps as the check.
+A valid projection preserves the tool call pairing reference, exact request,
+request/result observation times, recovery time, error flag, pagination, totals
+and existing integrity digest. There is no invented standalone result ID.
+`historical_cached_receipt_recovery` labels provenance, and recovery time never
+replaces source observation time. The integrity digest supplies no identity or
+creation authority.
+
+This backend slice leaves source-instance/registration binding, current source
+state, deployed query semantics, legacy mapping and principal visibility
+unverified. Authoritative deduplication also requires complete relevant case
+and run coverage, concurrency admission and write-time target-state checks.
+MCP v2 support and runtime activation require separate work.
+
 ## Live smoke test
 
 ```bash
