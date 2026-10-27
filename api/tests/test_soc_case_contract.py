@@ -4,7 +4,8 @@ import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.pool import QueuePool
 
 from api.integrations.clients.thehive import TheHiveClient
 from api.integrations.schemas import FindingCheckRequest
@@ -321,6 +322,47 @@ def test_run_hint_must_exist_and_does_not_narrow_bounded_scan(client, api_key, u
     response = read(client, api_key, run_id=str(ids[-1] + 1))
     assert response.status_code == 404 and response.json() == {"detail": "Run not found"}
     upstream.assert_not_called()
+
+
+def test_finding_check_needs_only_one_available_pool_connection(client, api_key, upstream, runs, temp_db, monkeypatch):
+    from api import database
+
+    ids = runs([context()], ["completed"])
+    engine = create_engine(
+        temp_db.kw["bind"].url,
+        connect_args={"check_same_thread": False},
+        poolclass=QueuePool, pool_size=1, max_overflow=0, pool_timeout=0,
+    )
+    temp_db.configure(bind=engine)
+    monkeypatch.setattr(database, "engine", engine)
+
+    def outbound(*args, **kwargs):
+        # The integration lookup and snapshot must both return the sole
+        # connection before transport, not just release SQLite read locks.
+        assert engine.pool.checkedout() == 0
+        with engine.connect() as connection:
+            assert not connection.connection.driver_connection.in_transaction
+            assert connection.execute(select(Execution.id)).scalars().all() == ids
+        return [{"_id": "~C1", "status": "New", "tags": [TAG]}]
+
+    upstream.side_effect = outbound
+    try:
+        response = read(client, api_key, run_id=str(ids[0]))
+        assert response.status_code == 200
+        data = response.json()
+        assert [row["run_id"] for row in data["run_matches"]] == ids
+        assert data["disposition"] == "blocked"
+        upstream.assert_called_once()
+        assert engine.pool.checkedout() == 0
+
+        upstream.reset_mock()
+        response = read(client, api_key, run_id=str(ids[0] + 1))
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Run not found"}
+        upstream.assert_not_called()
+        assert engine.pool.checkedout() == 0
+    finally:
+        engine.dispose()
 
 
 def test_run_snapshot_releases_sqlite_reader_before_outbound(client, api_key, upstream, runs, temp_db):
