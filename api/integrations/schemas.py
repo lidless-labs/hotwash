@@ -115,7 +115,7 @@ FindingGap = Literal[
     "cases_capped", "case_record_invalid", "case_identity_unmapped", "case_identity_invalid",
     "case_identity_conflict", "case_lifecycle_unknown", "case_lifecycle_conflict",
     "runs_capped", "run_context_invalid", "run_context_oversized", "run_identity_unmapped",
-    "run_case_link_missing", "run_case_link_unresolved", "run_attempt_state_unverified",
+    "run_case_link_missing", "run_case_link_unresolved", "run_case_link_conflict", "run_attempt_state_unverified",
 ]
 
 
@@ -149,4 +149,4 @@ class FindingCheckResponse(TheHiveReadRequest):
     run_matches: list[FindingRunMatch] = Field(max_length=100)
     coverage: FindingCoverage
     disposition: Literal["no_match_visible", "one_open_candidate", "closed_only", "ambiguous", "blocked"]
-    gaps: list[FindingGap] = Field(max_length=17)
+    gaps: list[FindingGap] = Field(max_length=18)

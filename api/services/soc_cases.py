@@ -80,14 +80,16 @@ def _case_matches(rows: object, fingerprint: str) -> tuple[list[FindingCaseMatch
             gaps.add("case_identity_conflict")
         status, stage = row.get("status"), row.get("stage")
         lifecycle = _LIFECYCLES.get(status, "unknown") if isinstance(status, str) else "unknown"
+        lifecycle_conflict = False
         if "stage" in row:
             stage_lifecycle = _STAGES.get(stage, "unknown") if isinstance(stage, str) else "unknown"
             if "unknown" in (stage_lifecycle, lifecycle):
                 lifecycle = "unknown"
             elif stage_lifecycle != lifecycle:
                 gaps.add("case_lifecycle_conflict")
+                lifecycle_conflict = True
                 lifecycle = "unknown"
-        if lifecycle == "unknown" and "case_lifecycle_conflict" not in gaps:
+        if lifecycle == "unknown" and not lifecycle_conflict:
             gaps.add("case_lifecycle_unknown")
         if fingerprint in identities:
             matches.append(FindingCaseMatch(case_id=case_id, lifecycle=lifecycle))
@@ -104,20 +106,21 @@ def _unique_object(pairs):
 
 
 def _run_snapshot(db: Session, candidate: FindingCheckRequest):
-    # sqlite3's legacy transaction mode does not BEGIN on SELECT. Establish a
-    # real read snapshot for both the optional lookup and bounded inventory.
-    connection = db.connection()
-    if connection.dialect.name == "sqlite" and not connection.connection.driver_connection.in_transaction:
-        connection.exec_driver_sql("BEGIN")
-    with db.no_autoflush:
+    # Own a separate read connection so closing the snapshot cannot flush,
+    # commit, or roll back caller-owned work. Materialize before returning;
+    # connection cleanup releases the reader before any upstream request.
+    with db.get_bind().engine.connect() as connection:
+        # sqlite3's legacy transaction mode does not BEGIN on SELECT.
+        if connection.dialect.name == "sqlite":
+            connection.exec_driver_sql("BEGIN")
         if candidate.run_id is not None:
-            existing = db.execute(select(Execution.id).where(Execution.id == candidate.run_id)).scalar_one_or_none()
+            existing = connection.execute(select(Execution.id).where(Execution.id == candidate.run_id)).scalar_one_or_none()
             if existing is None:
                 raise FindingRunNotFound()
         size = func.length(cast(Execution.context_json, LargeBinary))
         bounded_context = case((size <= MAX_CONTEXT_BYTES, Execution.context_json), else_=None)
-        return db.execute(select(Execution.id, size, bounded_context)
-                          .order_by(Execution.id.asc()).limit(INVENTORY_LIMIT + 1)).all()
+        return connection.execute(select(Execution.id, size, bounded_context)
+                                  .order_by(Execution.id.asc()).limit(INVENTORY_LIMIT + 1)).all()
 
 
 def _run_matches(rows, fingerprint: str, cases: list[FindingCaseMatch]) -> tuple[list[FindingRunMatch], set[str]]:
@@ -141,6 +144,8 @@ def _run_matches(rows, fingerprint: str, cases: list[FindingCaseMatch]) -> tuple
             gaps.add("run_identity_unmapped")
             continue
         if finding_fingerprint(identity) != fingerprint:
+            if identity.case_id in visible:
+                gaps.add("run_case_link_conflict")
             continue
         gaps.add("run_attempt_state_unverified")
         if identity.case_id is None:
@@ -158,7 +163,7 @@ def check_finding(db: Session, client: TheHiveClient, candidate: FindingCheckReq
     cases, case_gaps = _case_matches(client.list_cases(offset=0, limit=INVENTORY_LIMIT), fingerprint)
     runs, run_gaps = _run_matches(rows, fingerprint, cases)
     ambiguous = {"case_identity_conflict", "case_lifecycle_conflict"}
-    blocking = (case_gaps | run_gaps) - ambiguous - {"run_attempt_state_unverified"}
+    blocking = (case_gaps | run_gaps) - ambiguous
     if blocking:
         disposition = "blocked"
     elif (case_gaps & ambiguous) or len(cases) > 1:

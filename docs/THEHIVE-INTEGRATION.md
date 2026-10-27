@@ -237,6 +237,8 @@ status/stage values produce ambiguity. `New` and `InProgress` statuses map to
 `open`, and `Resolved` and `Deleted` map to `closed`. If present, stage must agree
 with that lifecycle. The supported stage values are those four status names,
 `Open`, and `Closed`. An unknown status or stage produces an explicit gap.
+Lifecycle gaps are evaluated per record, so separate conflicting and unknown
+records retain both gaps regardless of their order.
 
 For local runs, the candidate representation is a `context_json.soc_finding_v1`
 object with exactly the five tuple fields, plus an optional validated `case_id`:
@@ -258,13 +260,22 @@ This context is caller-controlled. Copied records, provenance labels,
 `started_by`, notes, generic Wazuh context and ingest cooldown fingerprints do
 not authenticate it. Matching runs carry `identity_basis: "untrusted_context_v1"`
 and `attempt_state: null`. A completed step or run does not prove an upstream
-action occurred. Missing or unseen case links block the disposition.
+action occurred. Every matching run adds `run_attempt_state_unverified` and
+blocks the disposition, including fully linked open or closed case candidates.
+Missing or unseen case links also block the disposition. A different-fingerprint
+run linked to a visible matching case adds `run_case_link_conflict` and blocks
+the result. The case candidate remains visible, and the different-fingerprint
+run is excluded from exact run matches. An unrelated run with an unrelated case
+link contributes no conflict.
 
 The check makes one fixed `listCase` request at offset 0 with limit 100 and a
 101st overflow sentinel. It scans local runs in ascending ID order across all
 statuses, also with a 101st sentinel. The optional run lookup and inventory
-share a database read transaction. Run context is limited to 65536 UTF-8 bytes
-before loading or parsing it. Oversized, malformed or duplicate-key JSON,
+share one separately owned database read transaction. The snapshot is fully
+materialized and its connection closes before the upstream request. This read
+does not flush, commit or roll back caller-owned session work. Run context is
+limited to 65536 UTF-8 bytes before loading or parsing it. Oversized, malformed
+or duplicate-key JSON,
 legacy records without the supported association, malformed identities and cap
 hits contribute finite gaps. The operation performs no source fetch, paging,
 local commit, evidence attachment, step transition or upstream mutation.

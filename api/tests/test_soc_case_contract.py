@@ -4,11 +4,13 @@ import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 
 from api.integrations.clients.thehive import TheHiveClient
+from api.integrations.schemas import FindingCheckRequest
 from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
 from api.security import PinnedURL
+from api.services.soc_cases import check_finding
 
 
 CANDIDATE = {"source": "wazuh", "source_instance_ref": "lab-a", "asset_id": "Asset01",
@@ -87,7 +89,9 @@ def test_finding_check_exact_candidates_and_read_only(client, api_key, upstream,
     assert data["run_matches"] == [{"run_id": i, "case_id": "~C1",
                                     "identity_basis": "untrusted_context_v1", "attempt_state": None}
                                    for i in ids]
-    assert data["disposition"] == "one_open_candidate"
+    # Exact candidates remain visible, but unknown prior attempts block the
+    # disposition under the approved finding-check contract.
+    assert data["disposition"] == "blocked"
     assert BASE_GAPS | {"run_attempt_state_unverified"} <= set(data["gaps"])
     assert data["coverage"]["visibility"] == "unverified"
     assert data["coverage"]["observed_at"] and data["coverage"]["contract_version"] == 1
@@ -105,6 +109,21 @@ def test_finding_check_exact_candidates_and_read_only(client, api_key, upstream,
         {"_name": "sort", "_fields": [{"_createdAt": "asc"}, {"_id": "asc"}]},
         {"_name": "page", "from": 0, "to": 101, "extraData": []},
     ]}, require_success=True)
+
+
+@pytest.mark.parametrize("status,lifecycle", [("New", "open"), ("Resolved", "closed")])
+def test_matching_run_unknown_attempt_blocks_fully_linked_case(client, api_key, upstream, runs, status, lifecycle):
+    ids = runs([context()], ["completed"])
+    upstream.return_value = [{"_id": "~C1", "status": status, "tags": [TAG]}]
+    response = read(client, api_key)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["case_matches"] == [{"case_id": "~C1", "lifecycle": lifecycle,
+                                     "identity_basis": "fingerprint_tag_v1"}]
+    assert data["run_matches"] == [{"run_id": ids[0], "case_id": "~C1",
+                                    "identity_basis": "untrusted_context_v1", "attempt_state": None}]
+    assert set(data["gaps"]) == BASE_GAPS | {"run_attempt_state_unverified"}
+    assert data["disposition"] == "blocked"
 
 
 @pytest.mark.parametrize("changes", [
@@ -202,6 +221,20 @@ def test_case_lifecycle_is_conservative(client, api_key, upstream, status, stage
         assert gap in data["gaps"]
 
 
+@pytest.mark.parametrize("conflict_first", [True, False])
+def test_lifecycle_gaps_are_independent_of_row_order(client, api_key, upstream, conflict_first):
+    rows = [{"_id": "~Conflict", "status": "New", "stage": "Closed", "tags": [TAG]},
+            {"_id": "~Unknown", "status": "Unrecognized", "tags": [TAG]}]
+    upstream.return_value = rows if conflict_first else list(reversed(rows))
+    response = read(client, api_key)
+    assert response.status_code == 200
+    data = response.json()
+    assert {r["case_id"] for r in data["case_matches"]} == {"~Conflict", "~Unknown"}
+    assert all(r["lifecycle"] == "unknown" for r in data["case_matches"])
+    assert set(data["gaps"]) == BASE_GAPS | {"case_lifecycle_conflict", "case_lifecycle_unknown"}
+    assert data["disposition"] == "blocked"
+
+
 @pytest.mark.parametrize("sibling,disposition,gap", [
     ("hotwash:finding:v1:" + "b" * 64, "ambiguous", "case_identity_conflict"),
     ("hotwash:finding:v1:invalid", "blocked", "case_identity_invalid"),
@@ -260,6 +293,23 @@ def test_matching_run_with_unresolved_case_link_blocks(client, api_key, upstream
     assert data["disposition"] == "blocked" and gap in data["gaps"]
 
 
+@pytest.mark.parametrize("case_id,conflict", [("~C1", True), ("~Unrelated", False)])
+def test_different_fingerprint_run_link_conflict(client, api_key, upstream, runs, case_id, conflict):
+    runs([context(sha256="b" * 64, case_id=case_id)])
+    upstream.return_value = [{"_id": "~C1", "status": "New", "tags": [TAG]}]
+    response = read(client, api_key)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["case_matches"] == [{"case_id": "~C1", "lifecycle": "open",
+                                     "identity_basis": "fingerprint_tag_v1"}]
+    assert data["run_matches"] == []
+    expected_gaps = BASE_GAPS | ({"run_case_link_conflict"} if conflict else set())
+    assert set(data["gaps"]) == expected_gaps
+    assert data["disposition"] == ("blocked" if conflict else "one_open_candidate")
+    assert data["coverage"]["runs"] == ("incomplete" if conflict else "complete")
+    upstream.assert_called_once()
+
+
 def test_run_hint_must_exist_and_does_not_narrow_bounded_scan(client, api_key, upstream, runs):
     ids = runs([context()] * 101, ["completed"] * 100 + ["other"])
     upstream.return_value = [{"_id": "~C1", "status": "New", "tags": [TAG]}]
@@ -271,6 +321,78 @@ def test_run_hint_must_exist_and_does_not_narrow_bounded_scan(client, api_key, u
     response = read(client, api_key, run_id=str(ids[-1] + 1))
     assert response.status_code == 404 and response.json() == {"detail": "Run not found"}
     upstream.assert_not_called()
+
+
+def test_run_snapshot_releases_sqlite_reader_before_outbound(client, api_key, upstream, runs, temp_db):
+    ids = runs([context()], ["completed"])
+    engine = temp_db.kw["bind"]
+    reads = []
+    with temp_db() as writer:
+        def after_read(conn, cursor, statement, parameters, ctx, many):
+            if ctx.compiled is not None and ctx.compiled.statement.is_select and "FROM executions" in statement:
+                native = conn.connection.driver_connection
+                reads.append((native, native.in_transaction))
+                if len(reads) == 1:
+                    # An independent writer changes the stored identity after
+                    # the optional lookup, while the read snapshot is open.
+                    writer.execute(Execution.__table__.update().where(Execution.id == ids[0])
+                                   .values(context_json=json.dumps(context(sha256="b" * 64))))
+
+        def outbound(*args, **kwargs):
+            # A materialized read must release its lock before network I/O.
+            writer.commit()
+            with temp_db() as observer:
+                stored = observer.get(Execution, ids[0])
+                assert json.loads(stored.context_json)["soc_finding_v1"]["sha256"] == "b" * 64
+            return [{"_id": "~C1", "status": "New", "tags": [TAG]}]
+
+        event.listen(engine, "after_cursor_execute", after_read)
+        upstream.side_effect = outbound
+        try:
+            response = read(client, api_key, run_id=str(ids[0]))
+        finally:
+            event.remove(engine, "after_cursor_execute", after_read)
+    assert response.status_code == 200
+    data = response.json()
+    # Both local reads happened within the same real SQLite transaction.
+    assert len(reads) >= 2
+    assert reads[0][0] is reads[1][0] and reads[0][1] and reads[1][1]
+    # The response keeps the old identity, even though the writer committed
+    # its replacement before returning the synthetic upstream page.
+    assert [r["run_id"] for r in data["run_matches"]] == ids
+    assert data["disposition"] == "blocked"
+    upstream.assert_called_once()
+
+
+@pytest.mark.parametrize("flushed", [False, True])
+def test_run_snapshot_preserves_caller_owned_work(temp_db, runs, flushed):
+    ids = runs([context()])
+    with temp_db() as caller:
+        caller.connection().exec_driver_sql("BEGIN")
+        row = caller.get(Execution, ids[0])
+        row.status = "abandoned"
+        pending = Playbook(title="Caller owned, uncommitted")
+        caller.add(pending)
+        if flushed:
+            caller.flush()
+        native = caller.connection().connection.driver_connection
+        with patch.object(TheHiveClient, "list_cases", return_value=[]) as upstream:
+            data = check_finding(caller, TheHiveClient(base_url="http://thehive.test", api_key="fake-key"),
+                                 FindingCheckRequest(**CANDIDATE, run_id=ids[0]))
+        assert native.in_transaction
+        assert row.status == "abandoned"
+        assert pending in caller
+        if not flushed:
+            assert row in caller.dirty and pending in caller.new and pending.id is None
+        with temp_db() as observer:
+            assert observer.get(Execution, ids[0]).status == "active"
+            assert observer.execute(select(Playbook.id).where(Playbook.title == pending.title)).first() is None
+        assert [r.run_id for r in data.run_matches] == ids
+        upstream.assert_called_once_with(offset=0, limit=100)
+        caller.rollback()
+    with temp_db() as observer:
+        assert observer.get(Execution, ids[0]).status == "active"
+        assert observer.execute(select(Playbook.id).where(Playbook.title == pending.title)).first() is None
 
 
 def test_case_sentinel_blocks_without_returning_or_following_it(client, api_key, upstream):
