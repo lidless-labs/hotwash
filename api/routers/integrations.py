@@ -26,6 +26,8 @@ from api.integrations.schemas import (
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
+    FindingCheckRequest,
+    FindingCheckResponse,
     RunAnalyzerRequest,
     ListCasesRequest,
     THEHIVE_READ_ACTIONS,
@@ -34,6 +36,7 @@ from api.orm_models import Execution, ExecutionEvent, RunEvent
 from api.routers.executions import _unique_evidence_path, _validate_node_id_for_path
 from api.schemas import IntegrationOut, IntegrationUpdate
 from api.security import apply_host_pinning, resolve_and_pin_integration_url
+from api.services.soc_cases import FindingRunNotFound, check_finding
 from api.services import replay
 from api.services.executions import find_step, load_steps, now_iso, serialize_steps
 
@@ -476,6 +479,28 @@ def _thehive_read_query(request: Request) -> dict[str, str]:
     if len({key for key, _ in values}) != len(values):
         raise HTTPException(status_code=422, detail="Duplicate query parameters")
     return dict(values)
+
+
+@router.get("/integrations/thehive/finding-check", response_model=FindingCheckResponse)
+def thehive_finding_check(request: Request, db: Session = Depends(get_db)):
+    query = _thehive_read_query(request)
+    try:
+        if "run_id" in query:
+            value = query["run_id"]
+            if len(value) > 19 or re.fullmatch(r"[1-9][0-9]*", value) is None:
+                raise ValueError("Invalid run ID")
+            query["run_id"] = int(value)
+        candidate = FindingCheckRequest.model_validate(query)
+    except (ValidationError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid finding check parameters") from None
+    integration = _get_integration(db, "thehive")
+    client = _build_thehive_client(integration)
+    try:
+        return check_finding(db, client, candidate)
+    except FindingRunNotFound:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+    except TheHiveError:
+        raise HTTPException(status_code=502, detail={"message": "TheHive read failed"}) from None
 
 
 @router.get("/integrations/thehive/cases")
