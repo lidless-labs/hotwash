@@ -101,6 +101,20 @@ removal. SHA256 identifies bytes and does not prove origin or custody.
 action, and optional source provenance. `source_ref` remains an opaque raw field.
 Provider `result` payloads and file contents are excluded.
 
+Evidence uploads allow at most 25 MiB (26,214,400 bytes) per file. The REST
+upload route authenticates before parsing multipart data. It caps the entire
+request at 25 MiB plus 64 KiB for multipart boundaries, headers, filenames, and
+provenance. An oversized Content-Length is rejected before reading, and a
+cumulative receive budget also covers streams without that header or with an
+understated value. Over-budget requests return 413 and do not write evidence or
+append events. File reads are bounded to 64 KiB and stop at the first excess byte.
+
+MCP enforces the same decoded byte limit before allocating an artifact buffer.
+Text is measured as UTF-8 bytes, including multibyte characters. Binary input
+must use canonical standard base64 with padding when needed. Invalid characters,
+incomplete quartets, and nonzero padding bits are rejected. The encoded string
+is capped at 34,952,536 characters, and the decoded size is checked separately.
+
 MCP `hotwash_attach_artifact` accepts optional `source_tool` and `source_ref`
 (nonempty strings up to 1,024 characters) and `observed_at` (RFC3339 with offset).
 The client sends them as multipart fields. They persist in `steps_json` and the

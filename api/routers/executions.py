@@ -39,6 +39,7 @@ from api.auth import (
     verify_ws_ticket,
 )
 from api.confirmation import require_confirmation
+from api.evidence_upload import EvidenceUploadRoute, MAX_EVIDENCE_BYTES
 from api import database
 from api.database import get_db
 from api.orm_models import Execution, ExecutionEvent, Playbook, RunEvent
@@ -67,7 +68,6 @@ from api.services.executions import (
 logger = logging.getLogger(__name__)
 
 EVIDENCE_ROOT = Path(__file__).resolve().parent.parent / "data" / "evidence"
-MAX_EVIDENCE_BYTES = 25 * 1024 * 1024  # 25 MB
 SAFE_NODE_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 MAX_EVIDENCE_FILENAME_LENGTH = 255
 
@@ -564,7 +564,10 @@ async def update_step(
     return detail
 
 
-@router.post("/executions/{execution_id}/steps/{node_id}/evidence", response_model=ExecutionStep)
+upload_router = APIRouter(route_class=EvidenceUploadRoute)
+
+
+@upload_router.post("/executions/{execution_id}/steps/{node_id}/evidence", response_model=ExecutionStep)
 async def upload_evidence(
     execution_id: int,
     node_id: str,
@@ -592,9 +595,14 @@ async def upload_evidence(
             raise HTTPException(status_code=422, detail=f"Invalid artifact provenance: {key}")
         provenance[key] = value
 
-    body = await file.read()
-    if len(body) > MAX_EVIDENCE_BYTES:
-        raise HTTPException(status_code=413, detail="Evidence file exceeds size limit")
+    body = bytearray()
+    while True:
+        chunk = await file.read(min(64 * 1024, MAX_EVIDENCE_BYTES - len(body) + 1))
+        if not chunk:
+            break
+        if len(body) + len(chunk) > MAX_EVIDENCE_BYTES:
+            raise HTTPException(status_code=413, detail="Evidence file exceeds size limit")
+        body.extend(chunk)
 
     _validate_node_id_for_path(node_id)
     target_dir = EVIDENCE_ROOT / str(execution.id) / node_id
@@ -626,6 +634,9 @@ async def upload_evidence(
     db.commit()
     await _broadcast(execution.id, "evidence_attached", {"node_id": node_id, "filename": stored_name})
     return ExecutionStep(**step)
+
+
+router.include_router(upload_router)
 
 
 @router.get("/executions/{execution_id}/timeline", response_model=List[TimelineEventOut])
