@@ -55,7 +55,7 @@ export function registerArtifactTools(server: McpServer, client: HotwashClient, 
       if (!text && !base64) {
         return fail(new Error("Provide either 'text' or 'base64' content for the artifact."));
       }
-      if (text && base64) {
+      if (text !== undefined && base64 !== undefined) {
         return fail(new Error("Provide either 'text' or 'base64', not both."));
       }
       try {

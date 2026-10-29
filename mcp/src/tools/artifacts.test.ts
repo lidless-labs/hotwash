@@ -116,3 +116,15 @@ test('artifact accepts exact byte boundaries and ordinary binary and UTF-8 conte
     assert.deepEqual(Buffer.from(received.pop()!), bytes);
   }
 });
+
+test("artifact rejects ambiguous empty content selectors", async () => {
+  const { handler, received } = artifactHarness();
+  for (const input of [
+    { text: "", base64: "YQ==" },
+    { text: "a", base64: "" },
+  ]) {
+    const result = await handler({ ...artifactInput, ...input });
+    assert.equal((result as { isError?: boolean }).isError, true);
+  }
+  assert.equal(received.length, 0);
+});
