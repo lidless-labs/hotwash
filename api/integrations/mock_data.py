@@ -76,7 +76,7 @@ def get_mock_thehive_action(action_name: str) -> dict:
         return {
             "case_id": raw["_id"],
             "number": raw["number"],
-            "url": "https://mock.thehive.local/cases/1001/details",
+            "url": "https://thehive.example.com/cases/1001/details",
             "raw": raw,
         }
     if action_name == "create_alert":
