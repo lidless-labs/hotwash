@@ -15,6 +15,9 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
     version: "0.3.0",
     description:
       "Drive Hotwash incident response playbooks: list playbooks, start runs against incidents, advance steps, attach evidence, query timelines, and review the Wazuh ingest suggestion queue. Wraps the Hotwash REST API.",
+  }, {
+    // Bound collection validation work before Zod parses free-form run context.
+    maxToolInputElements: 10_000,
   });
 
   const client = new HotwashClient(config);
