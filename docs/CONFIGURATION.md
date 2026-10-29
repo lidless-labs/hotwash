@@ -102,7 +102,7 @@ directory of `.md` runbooks).
 Comma-separated list of CIDRs that override the SSRF block on outbound integration URLs. Default: empty (all RFC1918, loopback, and link-local blocked).
 
 <!-- content-guard: allow private-ipv4 -->
-Use for lab/dev only. For example, `HOTWASH_PRIVATE_HOST_ALLOWLIST=192.168.1.0/24,10.0.0.0/8` lets the API talk to a TheHive VM at `192.168.1.50`. Loopback (`127.0.0.0/8`) and link-local (`169.254.0.0/16`) are never allowed, even if listed.
+Use for lab/dev only. In this fabricated private-network example, `HOTWASH_PRIVATE_HOST_ALLOWLIST=172.27.83.0/24,10.0.0.0/8` lets the API talk to a TheHive VM at `172.27.83.42`. Loopback (`127.0.0.0/8`) and link-local (`169.254.0.0/16`) are never allowed, even if listed.
 
 ### `HOTWASH_LIVE_THEHIVE_URL` / `HOTWASH_LIVE_THEHIVE_API_KEY`
 
