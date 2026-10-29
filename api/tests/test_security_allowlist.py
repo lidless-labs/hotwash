@@ -7,36 +7,38 @@ from fastapi import HTTPException
 
 from api import security
 
+# Fabricated RFC1918 fixtures. No live hosts are contacted.
+
 
 def test_blocks_private_lan_by_default(monkeypatch):
     monkeypatch.delenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", raising=False)
     security._reload_allowlist()
     with pytest.raises(HTTPException) as exc:
-        security.validate_integration_url("http://192.168.1.50:9000")
+        security.validate_integration_url("http://172.27.83.42:9000")
     assert exc.value.status_code == 422
 
 
 def test_allows_listed_cidr(monkeypatch):
-    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "192.168.1.0/24")
+    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "172.27.83.0/24")
     security._reload_allowlist()
     assert (
-        security.validate_integration_url("http://192.168.1.50:9000")
-        == "http://192.168.1.50:9000"
+        security.validate_integration_url("http://172.27.83.42:9000")
+        == "http://172.27.83.42:9000"
     )
 
 
 def test_multiple_cidrs(monkeypatch):
-    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "192.168.1.0/24, 10.0.0.0/8")
+    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "172.27.83.0/24, 10.0.0.0/8")
     security._reload_allowlist()
     assert security.validate_integration_url("http://10.5.5.5") == "http://10.5.5.5"
-    assert security.validate_integration_url("http://192.168.1.50") == "http://192.168.1.50"
+    assert security.validate_integration_url("http://172.27.83.42") == "http://172.27.83.42"
 
 
 def test_ignores_malformed_cidrs(monkeypatch, caplog):
-    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "not-a-cidr, 192.168.1.0/24")
+    monkeypatch.setenv("HOTWASH_PRIVATE_HOST_ALLOWLIST", "not-a-cidr, 172.27.83.0/24")
     security._reload_allowlist()
     # Still allows the good one
-    assert security.validate_integration_url("http://192.168.1.50") == "http://192.168.1.50"
+    assert security.validate_integration_url("http://172.27.83.42") == "http://172.27.83.42"
 
 
 def test_loopback_never_allowed_via_allowlist(monkeypatch):

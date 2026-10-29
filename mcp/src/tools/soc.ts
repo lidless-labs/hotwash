@@ -129,7 +129,7 @@ const mispReport = reportBase.extend({
     && (total === null || total === returned);
 });
 
-function readPage<T extends z.ZodTypeAny>(source: unknown, fact: T,
+function readPage<T extends { id: string }>(source: unknown, fact: z.ZodType<T>,
   requested: { offset?: number; limit?: number }, caseId?: string) {
   const result = metadata.extend({
     items: z.array(fact).max(100), returned: count, scanned: count,

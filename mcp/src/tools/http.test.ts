@@ -204,3 +204,33 @@ test("closes active sessions and the listener idempotently", async () => {
   await Promise.all([http!.close(), http!.close()]);
   await assert.rejects(fetch(`${url}/healthz`));
 });
+
+// Missing maxToolInputElements would let this valid free-form context reach the backend.
+test("rejects excessive tool input elements before contacting the backend", async () => {
+  configure();
+  process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
+  let backendRequests = 0;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).startsWith("http://example.invalid/")) {
+      backendRequests++;
+      return new Response(JSON.stringify({ id: 1, playbook_id: 1, incident_title: "bounded context",
+        status: "active", started_at: "2026-01-01T00:00:00Z", steps_total: 1, steps_completed: 0 }));
+    }
+    return originalFetch(input, init);
+  };
+  const { client } = await connect(await start());
+  const result = await client.callTool({
+    name: "hotwash_start_run",
+    arguments: { playbook_id: 1, incident_title: "bounded context", context: { items: Array(10_001).fill(0) } },
+  });
+  assert.equal(result.isError, true);
+  assert.match(JSON.stringify(result.content), /maximum.*elements/i);
+  assert.equal(backendRequests, 0);
+  // A small collection must still reach the configured backend.
+  const accepted = await client.callTool({
+    name: "hotwash_start_run",
+    arguments: { playbook_id: 1, incident_title: "bounded context", context: { items: [1, 2] } },
+  });
+  assert.notEqual(accepted.isError, true);
+  assert.equal(backendRequests, 1);
+});

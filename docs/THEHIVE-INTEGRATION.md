@@ -1,6 +1,6 @@
 # TheHive Integration
 
-<!-- Example IPs below are illustrative private-range placeholders. -->
+<!-- Examples use a reserved domain and fabricated private-range placeholders. -->
 <!-- content-guard: allow private-ipv4 file -->
 
 The existing write integration was tested against TheHive **5.4**. The bounded
@@ -19,7 +19,7 @@ All routes are gated by the standard `X-API-Key` header.
 
 1. On the IntegrationsPage, expand the **TheHive** card.
 2. Fill in:
-   - **Base URL** (e.g., `http://192.168.1.50:9000`)
+   - **Base URL** (e.g., `http://thehive.example.com:9000`)
    - **API key** (TheHive admin -> Account Settings -> API key)
    - Uncheck **Mock mode**, check **Enabled**.
 3. Hit **Save**, then **Test**. You should see `version` and `user` in the response.
@@ -27,8 +27,10 @@ All routes are gated by the standard `X-API-Key` header.
 If TheHive is on a private LAN, the API will refuse to talk to it unless you set:
 
 ```bash
-export HOTWASH_PRIVATE_HOST_ALLOWLIST="192.168.1.0/24"
+export HOTWASH_PRIVATE_HOST_ALLOWLIST="172.27.83.0/24"
 ```
+
+The reserved hostname `thehive.example.com` and private subnet above are fabricated examples. Substitute the address range where your instance resolves.
 
 (Loopback `127.0.0.0/8` and link-local `169.254.0.0/16` stay blocked even if listed, defense in depth.)
 
@@ -51,7 +53,7 @@ Request:
 ```
 Response:
 ```json
-{"case_id": "~12345", "number": 42, "url": "http://192.168.1.50:9000/cases/42/details", "raw": {...}}
+{"case_id": "~12345", "number": 42, "url": "http://thehive.example.com:9000/cases/42/details", "raw": {...}}
 ```
 
 Severity: 1 (low) to 4 (critical). TLP/PAP: 0 to 3 (TheHive standard).
@@ -436,9 +438,9 @@ MCP v2 support and runtime activation require separate work.
 ## Live smoke test
 
 ```bash
-export HOTWASH_LIVE_THEHIVE_URL=http://192.168.1.50:9000
+export HOTWASH_LIVE_THEHIVE_URL=http://thehive.example.com:9000
 export HOTWASH_LIVE_THEHIVE_API_KEY=<admin-api-key>
-export HOTWASH_PRIVATE_HOST_ALLOWLIST=192.168.1.0/24
+export HOTWASH_PRIVATE_HOST_ALLOWLIST=172.27.83.0/24
 pytest api/tests/test_thehive_live.py -m live -v -s
 ```
 
