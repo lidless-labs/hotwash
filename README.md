@@ -90,11 +90,11 @@ Add it to your MCP client config:
 }
 ```
 
-Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools; the server is read-only otherwise).
+Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools; the server is read-only otherwise), and `HOTWASH_MCP_ANALYZER_ALLOWLIST` (analyzer IDs `hotwash_run_analyzer` may launch, default `CIRCLHashlookup_1_1,MISP_2_1`).
 
 ### Tools
 
-The server registers 10 tools, all prefixed `hotwash_`:
+The server registers these tools, all prefixed `hotwash_` (the investigation read tools are listed in [`mcp/README.md`](mcp/README.md)):
 
 | Tool | What it does |
 |------|--------------|
@@ -108,8 +108,12 @@ The server registers 10 tools, all prefixed `hotwash_`:
 | `hotwash_list_suggestions` | List ingest suggestions queued from `mode=suggest` Wazuh mappings (the analyst review queue). |
 | `hotwash_accept_suggestion` | Promote a pending suggestion into a real execution, carrying its Wazuh alert as context. Destructive; requires `confirm: true`. |
 | `hotwash_dismiss_suggestion` | Dismiss a pending suggestion as noise and anchor the mapping cooldown. Destructive; requires `confirm: true`. |
+| `hotwash_create_case` | Create a TheHive triage case (severity at most 2, TLP/PAP at most AMBER, `soc-bot` tag always added). Requires `confirm: true`. |
+| `hotwash_add_case_observable` | Add a complete md5/sha1/sha256 hash or a file path to a case. Requires `confirm: true`. |
+| `hotwash_add_case_comment` | Append an internal comment (at most 8000 characters) to a case. Requires `confirm: true`. |
+| `hotwash_run_analyzer` | Launch an allowlisted Cortex analyzer (default `CIRCLHashlookup_1_1`, `MISP_2_1`) on a hash observable. Requires `confirm: true`. |
 
-State-changing tools (`hotwash_start_run`, `hotwash_advance_step`, `hotwash_attach_artifact`, `hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) run only when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` on the MCP server. Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) additionally refuse to act unless the caller passes `confirm: true`, and the API enforces the same confirmation, so a direct HTTP call cannot skip it. Results are typed, size-bounded, and mark upstream-written fields as untrusted.
+State-changing tools (`hotwash_start_run`, `hotwash_advance_step`, `hotwash_attach_artifact`, `hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`, `hotwash_create_case`, `hotwash_add_case_observable`, `hotwash_add_case_comment`, `hotwash_run_analyzer`) run only when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` on the MCP server. Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) and the four TheHive write tools additionally refuse to act unless the caller passes `confirm: true`, and the API enforces the same confirmation, so a direct HTTP call cannot skip it. Results are typed, size-bounded, and mark upstream-written fields as untrusted.
 
 ---
 

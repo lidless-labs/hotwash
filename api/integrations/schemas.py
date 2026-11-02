@@ -46,6 +46,13 @@ class AddObservableRequest(_Strict):
     tags: list[str] = Field(default_factory=list)
 
 
+class AddCommentRequest(_Strict):
+    """Append an internal comment to an existing TheHive case."""
+
+    case_id: str = Field(..., pattern=r"^~[A-Za-z0-9]+$", max_length=128)
+    message: str = Field(..., min_length=1, max_length=8000)
+
+
 class RunAnalyzerRequest(_Strict):
     """Launch a Cortex analyzer on an existing TheHive observable.
 

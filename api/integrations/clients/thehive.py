@@ -241,6 +241,17 @@ class TheHiveClient:
         encoded_case_id = quote(case_id, safe="")
         return self._request("POST", f"/api/v1/case/{encoded_case_id}/observable", json=payload)
 
+    def add_comment(self, *, case_id: str, message: str) -> dict[str, Any]:
+        """Append an internal comment to a case.
+
+        TheHive 5 comments are internal to the case. The request carries only
+        ``message``, so no comment can be marked for external sharing here.
+        """
+        encoded_case_id = quote(case_id, safe="")
+        return self._request(
+            "POST", f"/api/v1/case/{encoded_case_id}/comment", json={"message": message}
+        )
+
     def run_analyzer(
         self,
         *,

@@ -23,6 +23,7 @@ from api.integrations.connectors import get_connector, preflight_active_response
 from api.integrations.config import Integration
 from api.integrations.mock_data import MOCK_HANDLERS, get_mock_action_result
 from api.integrations.schemas import (
+    AddCommentRequest,
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
@@ -604,6 +605,17 @@ def thehive_add_observable(payload: AddObservableRequest = Body(...), db: Sessio
     return _dispatch_connector_action(
         "thehive",
         "add_observable",
+        payload.model_dump(),
+        db,
+        allow_mock_mode=False,
+    )
+
+
+@router.post("/integrations/thehive/actions/add_comment")
+def thehive_add_comment(payload: AddCommentRequest = Body(...), db: Session = Depends(get_db)):
+    return _dispatch_connector_action(
+        "thehive",
+        "add_comment",
         payload.model_dump(),
         db,
         allow_mock_mode=False,

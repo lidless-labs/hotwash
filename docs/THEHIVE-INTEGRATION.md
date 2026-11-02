@@ -95,6 +95,20 @@ Request:
 }
 ```
 
+### `POST /api/integrations/thehive/actions/add_comment`
+
+Appends an internal comment to an existing case.
+
+Request:
+```json
+{
+  "case_id": "~12345",
+  "message": "CIRCL hash lookup returned no match."
+}
+```
+
+`case_id` follows the same `~` plus alphanumerics rule as the other actions. `message` is 1 to 8000 characters after trimming. The request is strict, so any other field (including an external-sharing flag) is rejected with `422`. Hotwash sends `POST /api/v1/case/{case_id}/comment` with only `{"message": ...}`. The response is `{"comment_id", "raw"}`. Like the other write actions it refuses to run against a mock-mode integration.
+
 ### `POST /api/integrations/thehive/actions/run_analyzer`
 
 Launches a Cortex analyzer on an existing observable through TheHive's Cortex link.

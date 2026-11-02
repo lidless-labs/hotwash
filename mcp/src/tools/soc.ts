@@ -7,7 +7,7 @@ import { fail, READ_ONLY_TOOL } from "./_util.js";
 import { readResult } from "./_read.js";
 
 // The end assertion rejects trailing newlines as well as separators and DSL.
-const id = z.string().max(128).regex(/^~[A-Za-z0-9]+(?![\s\S])/);
+export const id = z.string().max(128).regex(/^~[A-Za-z0-9]+(?![\s\S])/);
 const page = {
   offset: z.number().int().min(0).max(10000).optional(),
   limit: z.number().int().min(1).max(100).optional(),
@@ -104,7 +104,7 @@ const caseFact = z.object({
   id, status, stage: text.optional(), title: text.optional(),
   number: count.refine(n => n > 0).optional(), tags: z.array(text).max(32).optional(), dates,
 });
-const observableFact = z.object({
+export const observableFact = z.object({
   id, data_type: z.enum(["hash", "filename"]), data: z.string().min(1).max(2000),
   tlp: z.number().int().min(0).max(3).nullable(), dates,
 }).refine(item => item.data_type === "hash"
@@ -129,7 +129,7 @@ const mispReport = reportBase.extend({
     && (total === null || total === returned);
 });
 
-function readPage<T extends { id: string }>(source: unknown, fact: z.ZodType<T>,
+export function readPage<T extends { id: string }>(source: unknown, fact: z.ZodType<T>,
   requested: { offset?: number; limit?: number }, caseId?: string) {
   const result = metadata.extend({
     items: z.array(fact).max(100), returned: count, scanned: count,
