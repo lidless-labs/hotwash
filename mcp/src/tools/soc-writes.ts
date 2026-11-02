@@ -110,9 +110,9 @@ export function registerSocWriteTools(
   server: McpServer,
   client: HotwashClient,
   policy: ToolPolicy | undefined,
-  analyzerAllowlist: readonly string[],
+  analyzerAllowlist: Readonly<Record<string, string>>,
 ): void {
-  const allowed = new Set(analyzerAllowlist);
+  const allowed = new Map(Object.entries(analyzerAllowlist));
 
   server.registerTool("hotwash_create_case", {
     description: `Create one TheHive triage case through the Hotwash connector. Requires HOTWASH_MCP_ALLOW_MUTATIONS=true on the server and confirm: true. Severity is 1 (default) or 2. TLP and PAP default to 2 (AMBER) and cannot exceed it. The tag ${SOC_BOT_TAG} is always added. Unknown fields are refused. Not idempotent: check hotwash_list_cases before creating, and do not retry a failed call blindly. Returns the case id and number.`,
@@ -166,12 +166,13 @@ export function registerSocWriteTools(
   });
 
   server.registerTool("hotwash_run_analyzer", {
-    description: `Launch one allowlisted Cortex analyzer on a hash observable in a known case. The allowlist is operator configuration (HOTWASH_MCP_ANALYZER_ALLOWLIST, default CIRCLHashlookup_1_1 and MISP_2_1). The observable must belong to the case and be a hash. Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Launches only; it does not poll. Read the job with hotwash_get_analyzer_job. A launched job or a lookup miss is not a clean verdict. Returns the job id and status.`,
+    description: `Launch one allowlisted Cortex analyzer on a hash observable in a known case. Pass the analyzer name. The operator allowlist (HOTWASH_MCP_ANALYZER_ALLOWLIST, Name=WorkerId pairs, empty by default) maps it to the Cortex worker id. The observable must belong to the case and be a hash. Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Launches only; it does not poll. Read the job with hotwash_get_analyzer_job. A launched job or a lookup miss is not a clean verdict. Returns the job id and status.`,
     inputSchema: runAnalyzerInput, annotations: WRITE_TOOL,
   }, async args => {
     const blocked = guardMutation(policy, "launch this analyzer");
     if (blocked) return blocked;
-    if (!allowed.has(args.analyzer)) {
+    const workerId = allowed.get(args.analyzer);
+    if (workerId === undefined) {
       // The allowlist is not echoed: it is operator configuration.
       return fail(new Error("Refusing to launch this analyzer: it is not on the operator allowlist."));
     }
@@ -187,7 +188,7 @@ export function registerSocWriteTools(
       return fail(new Error("Refusing to launch: the observable could not be verified as a hash in this case."));
     }
     try {
-      const job = parseResult(launchedJob, await client.runAnalyzer({ artifact_id: args.observable_id, analyzer_id: args.analyzer }), "run_analyzer");
+      const job = parseResult(launchedJob, await client.runAnalyzer({ artifact_id: args.observable_id, analyzer_id: workerId }), "run_analyzer");
       return ok(
         { job_id: job.job_id, status: job.status ?? null, analyzer: args.analyzer, observable_id: args.observable_id, case_id: args.case_id },
         ["status"],

@@ -47,14 +47,16 @@ input is validated before any backend request.
 | `hotwash_create_case` | `title` 1 to 200 characters, `description` 1 to 8000. `severity` 1 or 2 (default 1). `tlp` and `pap` 0 to 2 (default 2, AMBER). Up to 15 `tags` of `[A-Za-z0-9_.:-]`, 128 characters each (room for the `hotwash:finding:v1:` and `hotwash:rootcheck:v2:` association tags); `soc-bot` is added when missing, so a case always carries it. Returns the case ID and number plus the applied severity, TLP, PAP and tags. No case URL or raw TheHive record. |
 | `hotwash_add_case_observable` | `dataType` is `hash` or `filename` only. A hash must be a complete md5 (32), sha1 (40) or sha256 (64) hex digest, lowercased before sending. A file path is up to 1024 characters with no control characters and is stored as data, never opened. `tlp` 0 to 2 (default 2), `ioc` default `false`, optional `message` up to 500 characters. `sighted` and tags are not exposed. |
 | `hotwash_add_case_comment` | `message` 1 to 8000 characters. The request carries only the message, so the comment is internal. |
-| `hotwash_run_analyzer` | `analyzer` must be on the operator allowlist. The observable must belong to `case_id` and be a hash; the tool reads up to five pages of 100 case observables to prove that and refuses otherwise. Launches only, and returns the job ID for `hotwash_get_analyzer_job`. The Cortex instance is the backend default. |
+| `hotwash_run_analyzer` | `analyzer` is a name on the operator allowlist, which maps it to the Cortex worker ID. The observable must belong to `case_id` and be a hash; the tool reads up to five pages of 100 case observables to prove that and refuses otherwise. Launches only, and returns the job ID for `hotwash_get_analyzer_job`. The Cortex instance is the backend default. |
 
 Analyzer allowlist: `HOTWASH_MCP_ANALYZER_ALLOWLIST` is a comma-separated list
-of exact analyzer IDs (letters, digits, `_`, `-`). Unset or blank selects
-`CIRCLHashlookup_1_1,MISP_2_1`. Malformed entries are dropped, and a value with
-no valid entry refuses every launch. The entry is the string sent upstream as
-`analyzer_id`, so a deployment whose Cortex uses opaque worker IDs lists those
-IDs instead. Only the operator can change it; no tool argument can.
+of exact `Name=WorkerId` pairs (letters, digits, `_`, `-` on both sides), for
+example `CIRCLHashlookup_1_1=<worker id>,MISP_2_1=<worker id>`. Cortex launches
+analyzers by worker ID, a hash generated per deployment, so the tool takes the
+analyzer name and sends the mapped worker ID. Read the IDs from TheHive's
+`GET /api/connector/cortex/analyzer`. There is no default: unset, blank, bare
+names and malformed pairs launch nothing, and a name listed with two different
+worker IDs is dropped. Only the operator can change it; no tool argument can.
 
 Write responses contain only IDs and values the tool validated or supplied. A
 failure reports the HTTP status and that the outcome is unconfirmed, never the
@@ -135,7 +137,7 @@ Environment variables:
 | `HOTWASH_API_KEY` | yes if API auth is on | - | Sent as `X-API-Key` |
 | `HOTWASH_TIMEOUT` | no | `30` | Request timeout in seconds |
 | `HOTWASH_MCP_ALLOW_MUTATIONS` | no | `false` | Operator switch for state-changing tools. While unset, the server is read-only: start, advance, cancel, attach, accept, dismiss and the four TheHive write tools refuse to run. |
-| `HOTWASH_MCP_ANALYZER_ALLOWLIST` | no | `CIRCLHashlookup_1_1,MISP_2_1` | Comma-separated analyzer IDs `hotwash_run_analyzer` may launch. See above. |
+| `HOTWASH_MCP_ANALYZER_ALLOWLIST` | no | empty (no launches) | Comma-separated `Name=WorkerId` pairs `hotwash_run_analyzer` may launch. See above. |
 | `HOTWASH_MCP_MAX_RESPONSE_BYTES` | no | `5242880` | Largest backend response body the server will read |
 
 ### Safe defaults

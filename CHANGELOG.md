@@ -41,9 +41,9 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   `HOTWASH_MCP_ALLOW_MUTATIONS=true` and `confirm: true`. Cases are capped at
   severity 2 and TLP/PAP AMBER and always carry the `soc-bot` tag. Observables
   are limited to complete md5/sha1/sha256 hashes and file paths. Analyzer
-  launches are limited to an operator allowlist
-  (`HOTWASH_MCP_ANALYZER_ALLOWLIST`, default `CIRCLHashlookup_1_1` and
-  `MISP_2_1`) and to hash observables proven to belong to the case. There are
+  launches are limited to an operator allowlist of analyzer names mapped to
+  Cortex worker IDs (`HOTWASH_MCP_ANALYZER_ALLOWLIST`, `Name=WorkerId` pairs,
+  empty by default) and to hash observables proven to belong to the case. There are
   no update, delete, merge, close or share tools.
 - TheHive `run_analyzer` SOAR action: launches a Cortex analyzer on an
   observable through TheHive's Cortex link

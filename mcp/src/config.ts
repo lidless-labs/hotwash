@@ -6,22 +6,37 @@ export interface HotwashConfig {
   maxResponseBytes?: number;
   // Operator opt-in for state-changing tools. Defaults to false (read-only).
   allowMutations?: boolean;
-  // Cortex analyzer ids hotwash_run_analyzer may launch. Operator-controlled
-  // (HOTWASH_MCP_ANALYZER_ALLOWLIST); never taken from tool arguments.
-  analyzerAllowlist?: string[];
+  // Analyzer name -> Cortex worker id that hotwash_run_analyzer may launch.
+  // Operator-controlled (HOTWASH_MCP_ANALYZER_ALLOWLIST); never taken from
+  // tool arguments. Cortex launches by worker id, a per-deployment hash.
+  analyzerAllowlist?: Readonly<Record<string, string>>;
 }
 
 export const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
-export const DEFAULT_ANALYZER_ALLOWLIST = ["CIRCLHashlookup_1_1", "MISP_2_1"] as const;
-const ANALYZER_ID = /^[A-Za-z0-9_-]{1,128}$/;
+// Recommended entries for the SOC triage scope. Worker ids differ per Cortex
+// deployment, so there is no default mapping: an unset allowlist launches nothing.
+export const RECOMMENDED_ANALYZER_NAMES = ["CIRCLHashlookup_1_1", "MISP_2_1"] as const;
+const ANALYZER_TOKEN = /^[A-Za-z0-9_-]{1,128}$/;
 
-// Unset or blank selects the default pair. A set value is a comma-separated
-// list of exact analyzer ids. Malformed entries are dropped, and a list with no
-// valid entry leaves the tool refusing every launch (fail closed).
-export function parseAnalyzerAllowlist(raw: string | undefined): string[] {
-  if (raw === undefined || raw.trim() === "") return [...DEFAULT_ANALYZER_ALLOWLIST];
-  return [...new Set(raw.split(",").map(entry => entry.trim()).filter(entry => ANALYZER_ID.test(entry)))];
+// A comma-separated list of exact `Name=WorkerId` pairs. Unset, blank, a bare
+// name, or a malformed pair is dropped. A name listed with two different worker
+// ids is dropped entirely. The result can be empty, which refuses every launch.
+export function parseAnalyzerAllowlist(raw: string | undefined): Record<string, string> {
+  const result = new Map<string, string>();
+  const conflicted = new Set<string>();
+  for (const entry of (raw ?? "").split(",")) {
+    const parts = entry.trim().split("=");
+    if (parts.length !== 2) continue;
+    const [name, worker] = parts.map(part => part.trim());
+    if (!ANALYZER_TOKEN.test(name) || !ANALYZER_TOKEN.test(worker)) continue;
+    const existing = result.get(name);
+    if (existing !== undefined && existing !== worker) conflicted.add(name);
+    else result.set(name, worker);
+  }
+  for (const name of conflicted) result.delete(name);
+  // fromEntries defines own data properties, so names such as __proto__ stay data.
+  return Object.fromEntries(result);
 }
 
 const TRUTHY = new Set(["1", "true", "yes", "on"]);

@@ -1,7 +1,7 @@
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HotwashClient } from "./client.js";
-import { DEFAULT_ANALYZER_ALLOWLIST, getConfig, type HotwashConfig } from "./config.js";
+import { getConfig, type HotwashConfig } from "./config.js";
 import { registerArtifactTools } from "./tools/artifacts.js";
 import { registerPlaybookTools } from "./tools/playbooks.js";
 import { registerRunTools } from "./tools/runs.js";
@@ -29,7 +29,7 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   registerArtifactTools(server, client, policy);
   registerSuggestionTools(server, client, policy);
   registerSocTools(server, client);
-  registerSocWriteTools(server, client, policy, config.analyzerAllowlist ?? [...DEFAULT_ANALYZER_ALLOWLIST]);
+  registerSocWriteTools(server, client, policy, config.analyzerAllowlist ?? {});
 
   return server;
 }

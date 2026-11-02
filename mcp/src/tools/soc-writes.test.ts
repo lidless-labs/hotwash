@@ -12,8 +12,9 @@ afterEach(async () => {
   globalThis.fetch = realFetch;
   await Promise.all(connections.splice(0).map(client => client.close()));
 });
+const WORKERS = { CIRCLHashlookup_1_1: "1111aaaa2222bbbb3333cccc4444dddd", MISP_2_1: "5555eeee6666ffff7777aaaa8888bbbb" };
 async function connect(config: Partial<HotwashConfig> = {}) {
-  const server = createMcpServer({ url: "http://example.invalid", timeout: 1000, allowMutations: true, ...config });
+  const server = createMcpServer({ url: "http://example.invalid", timeout: 1000, allowMutations: true, analyzerAllowlist: WORKERS, ...config });
   const client = new Client({ name: "soc-writes-test", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(b), client.connect(a)]);
@@ -219,7 +220,8 @@ test("run_analyzer launches an allowlisted analyzer on a verified hash and retur
   const posts = seen.filter(s => s.method === "POST");
   assert.equal(posts.length, 2);
   assert.equal(posts[0].path, `${WRITES}run_analyzer`);
-  assert.deepEqual(posts[0].body, { artifact_id: "~O1", analyzer_id: "CIRCLHashlookup_1_1" });
+  assert.deepEqual(posts[0].body, { artifact_id: "~O1", analyzer_id: WORKERS.CIRCLHashlookup_1_1 });
+  assert.deepEqual(posts[1].body, { artifact_id: "~O1", analyzer_id: WORKERS.MISP_2_1 });
   assert.deepEqual(seen[0].path, "/api/integrations/thehive/cases/~C1/observables");
 });
 
@@ -233,26 +235,32 @@ test("run_analyzer refuses analyzers outside the allowlist before any request", 
   assert.equal(seen.length, 0);
   const refusal = await client.callTool({ name: "hotwash_run_analyzer", arguments: runArgs({ analyzer: "Abuse_Finder_3_0" }) });
   assert.match(JSON.stringify(refusal.content), /allowlist/);
-  assert.doesNotMatch(JSON.stringify(refusal.content), /CIRCLHashlookup|MISP_2_1/);
+  assert.doesNotMatch(JSON.stringify(refusal.content), /CIRCLHashlookup|MISP_2_1|1111aaaa|5555eeee/);
 });
 
 test("run_analyzer allowlist is operator configuration, replacing the default", async () => {
   const seen = record(entry => entry.method === "GET" ? json(observablePage([hashFact("~O1")])) : json({ job_id: "~J2" }));
-  const client = await connect({ analyzerAllowlist: ["Custom_Analyzer_1_0"] });
+  const client = await connect({ analyzerAllowlist: { Custom_Analyzer_1_0: "c0ffee00c0ffee00c0ffee00c0ffee00" } });
   assert.equal((await client.callTool({ name: "hotwash_run_analyzer", arguments: runArgs({ analyzer: "MISP_2_1" }) })).isError, true);
   assert.equal(seen.length, 0);
   const result = await client.callTool({ name: "hotwash_run_analyzer", arguments: runArgs({ analyzer: "Custom_Analyzer_1_0" }) });
   assert.notEqual(result.isError, true);
   assert.equal(data(result).status, null);
-  const closed = await connect({ analyzerAllowlist: [] });
+  assert.deepEqual(seen.filter(s => s.method === "POST")[0].body, { artifact_id: "~O1", analyzer_id: "c0ffee00c0ffee00c0ffee00c0ffee00" });
+  const closed = await connect({ analyzerAllowlist: {} });
   assert.equal((await closed.callTool({ name: "hotwash_run_analyzer", arguments: runArgs() })).isError, true);
 });
 
 test("analyzer allowlist environment parsing is exact and fails closed", () => {
-  assert.deepEqual(parseAnalyzerAllowlist(undefined), ["CIRCLHashlookup_1_1", "MISP_2_1"]);
-  assert.deepEqual(parseAnalyzerAllowlist("  "), ["CIRCLHashlookup_1_1", "MISP_2_1"]);
-  assert.deepEqual(parseAnalyzerAllowlist("A_1, B-2 ,A_1"), ["A_1", "B-2"]);
-  assert.deepEqual(parseAnalyzerAllowlist("bad id,../x,*,a;b"), []);
+  assert.deepEqual(parseAnalyzerAllowlist(undefined), {});
+  assert.deepEqual(parseAnalyzerAllowlist("  "), {});
+  assert.deepEqual(parseAnalyzerAllowlist("A_1=w1, B-2 = w2 ,A_1=w1"), { "A_1": "w1", "B-2": "w2" });
+  assert.deepEqual(parseAnalyzerAllowlist("A_1,B_2"), {}, "bare names have no worker id");
+  assert.deepEqual(parseAnalyzerAllowlist("bad id=w,../x=w,*=w,a=b=c,a=,=w"), {});
+  assert.deepEqual(parseAnalyzerAllowlist("A_1=w1,A_1=w2,B_2=w3"), { "B_2": "w3" }, "conflicting worker ids drop the name");
+  const odd = parseAnalyzerAllowlist("__proto__=w1,constructor=w2");
+  assert.equal(Object.getPrototypeOf(odd), Object.prototype);
+  assert.deepEqual(Object.entries(odd), [["__proto__", "w1"], ["constructor", "w2"]]);
 });
 
 test("run_analyzer launches only on hash observables that belong to the case", async () => {
