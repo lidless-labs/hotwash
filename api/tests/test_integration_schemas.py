@@ -137,3 +137,25 @@ def test_run_analyzer_rejects_unsafe_ids():
 def test_run_analyzer_rejects_extra_fields():
     with pytest.raises(ValidationError):
         RunAnalyzerRequest(artifact_id="~1", analyzer_id="abc", url="http://evil")
+
+
+def test_add_comment_minimal_and_strict():
+    from api.integrations.schemas import AddCommentRequest
+
+    req = AddCommentRequest(case_id="~123", message="  triage note  ")
+    assert req.message == "triage note"
+    with pytest.raises(ValidationError):
+        AddCommentRequest(case_id="~123", message="note", external=True)
+    assert AddCommentRequest.model_json_schema()["additionalProperties"] is False
+
+
+def test_add_comment_bounds_message_and_rejects_unsafe_case_ids():
+    from api.integrations.schemas import AddCommentRequest
+
+    assert AddCommentRequest(case_id="~1", message="x" * 8000).message == "x" * 8000
+    for bad_message in ["", "   ", "x" * 8001]:
+        with pytest.raises(ValidationError):
+            AddCommentRequest(case_id="~1", message=bad_message)
+    for bad_id in ["~123/comment", "../etc/passwd", "~123?x=1", "~123#f", "~1 2", "no-tilde", ""]:
+        with pytest.raises(ValidationError):
+            AddCommentRequest(case_id=bad_id, message="note")

@@ -302,6 +302,37 @@ def test_add_observable_url_encodes_case_id():
     assert url == "http://example:9000/api/v1/case/weird%2Fpath%3Fx%3Dy/observable"
 
 
+def test_add_comment_posts_message_only_to_case_comment_endpoint():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~C9"})
+        result = client.add_comment(case_id="~123", message="enrichment complete")
+    args, kwargs = mocked.call_args
+    assert args[0] == "POST"
+    assert args[1] == "http://example:9000/api/v1/case/~123/comment"
+    assert kwargs["json"] == {"message": "enrichment complete"}
+    assert kwargs["allow_redirects"] is False
+    assert result["_id"] == "~C9"
+
+
+def test_add_comment_url_encodes_case_id():
+    client = TheHiveClient(base_url="http://example:9000", api_key="k")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(201, json_body={"_id": "~C10"})
+        client.add_comment(case_id="weird/path?x=y", message="note")
+    assert mocked.call_args[0][1] == "http://example:9000/api/v1/case/weird%2Fpath%3Fx%3Dy/comment"
+
+
+def test_add_comment_surfaces_upstream_error_without_api_key():
+    client = TheHiveClient(base_url="http://example:9000", api_key="super-secret-key")
+    with patch.object(client._session, "request") as mocked:
+        mocked.return_value = _mock_response(400, json_body={"type": "InvalidInput"})
+        with pytest.raises(TheHiveError) as excinfo:
+            client.add_comment(case_id="~1", message="note")
+    assert excinfo.value.status_code == 400
+    assert "super-secret-key" not in str(excinfo.value)
+
+
 def test_run_analyzer_posts_to_cortex_job_endpoint():
     client = TheHiveClient(base_url="http://example:9000", api_key="k")
     with patch.object(client._session, "request") as mocked:

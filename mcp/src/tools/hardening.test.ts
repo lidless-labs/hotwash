@@ -96,7 +96,8 @@ test("every tool declares all four annotation hints, matching its behavior", asy
   const readOnly = ["hotwash_list_playbooks", "hotwash_get_playbook", "hotwash_query_run", "hotwash_list_suggestions",
     "hotwash_list_runs", "hotwash_get_run_report", "hotwash_list_cases", "hotwash_get_case",
     "hotwash_list_case_observables", "hotwash_list_case_comments", "hotwash_get_analyzer_job", "hotwash_check_finding"];
-  const mutating = ["hotwash_start_run", "hotwash_advance_step", "hotwash_cancel_run", "hotwash_attach_artifact", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion"];
+  const mutating = ["hotwash_start_run", "hotwash_advance_step", "hotwash_cancel_run", "hotwash_attach_artifact", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion",
+    "hotwash_create_case", "hotwash_add_case_observable", "hotwash_add_case_comment", "hotwash_run_analyzer"];
   assert.deepEqual([...byName.keys()].sort(), [...readOnly, ...mutating].sort());
   for (const [name, hints] of byName) {
     for (const key of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const) {
@@ -121,6 +122,10 @@ const MUTATING_CALLS: [string, Record<string, unknown>][] = [
   ["hotwash_attach_artifact", { execution_id: 1, node_id: "n", filename: "f.txt", text: "x" }],
   ["hotwash_accept_suggestion", { suggestion_id: 1, confirm: true }],
   ["hotwash_dismiss_suggestion", { suggestion_id: 1, confirm: true }],
+  ["hotwash_create_case", { title: "t", description: "d", confirm: true }],
+  ["hotwash_add_case_observable", { case_id: "~C1", dataType: "hash", value: "a".repeat(64), confirm: true }],
+  ["hotwash_add_case_comment", { case_id: "~C1", message: "note", confirm: true }],
+  ["hotwash_run_analyzer", { case_id: "~C1", observable_id: "~O1", analyzer: "MISP_2_1", confirm: true }],
 ];
 
 for (const [name, args] of MUTATING_CALLS) {

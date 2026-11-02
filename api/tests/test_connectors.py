@@ -80,6 +80,7 @@ def test_connectors_declare_pydantic_action_schemas():
         "create_case",
         "create_alert",
         "add_observable",
+        "add_comment",
         "run_analyzer",
         "list_cases",
         "get_case",
@@ -88,6 +89,14 @@ def test_connectors_declare_pydantic_action_schemas():
         "get_analyzer_job",
     }
     assert thehive_actions["run_analyzer"].model_json_schema()["additionalProperties"] is False
+
+
+def test_mock_thehive_add_comment_shape():
+    from api.integrations.mock_data import get_mock_thehive_action
+
+    result = get_mock_thehive_action("add_comment")
+    assert result["comment_id"] == "~mock-comment-1"
+    assert result["raw"]["mock"] is True
 
 
 def test_mock_thehive_run_analyzer_shape():

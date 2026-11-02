@@ -69,6 +69,7 @@ from api.integrations.clients.bounded import UpstreamResponseTooLarge, read_boun
 from api.integrations.clients.thehive import TheHiveClient, TheHiveError
 from api.integrations.clients.wazuh import WazuhClient, WazuhError
 from api.integrations.schemas import (
+    AddCommentRequest,
     AddObservableRequest,
     CreateAlertRequest,
     CreateCaseRequest,
@@ -105,6 +106,7 @@ class TheHiveConnector:
             "create_case": CreateCaseRequest,
             "create_alert": CreateAlertRequest,
             "add_observable": AddObservableRequest,
+            "add_comment": AddCommentRequest,
             "run_analyzer": RunAnalyzerRequest,
             "list_cases": ListCasesRequest,
             "get_case": GetCaseRequest,
@@ -181,6 +183,11 @@ class TheHiveConnector:
                 tags=payload.tags,
             )
             return {"observable_id": result.get("_id"), "raw": result}
+
+        if action_name == "add_comment":
+            payload = _as(AddCommentRequest, validated_payload)
+            result = client.add_comment(case_id=payload.case_id, message=payload.message)
+            return {"comment_id": result.get("_id"), "raw": result}
 
         if action_name == "run_analyzer":
             payload = _as(RunAnalyzerRequest, validated_payload)

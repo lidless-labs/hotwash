@@ -238,6 +238,49 @@ export class HotwashClient {
     return this.evidenceRead(`/api/integrations/thehive/analyzer-jobs/${encodeURIComponent(jobId)}`);
   }
 
+  // Bounded TheHive connector writes. A write is never retried or redirected,
+  // and failures expose only the HTTP status: no backend text, URL or key.
+  private async thehiveWrite(action: string, body: Record<string, unknown>): Promise<unknown> {
+    const failure = (status?: number) =>
+      new Error(`Hotwash write failed${status ? ` (HTTP ${status})` : ""}; ${action} outcome not confirmed`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const response = await fetch(`${this.baseUrl}/api/integrations/thehive/actions/${action}`, {
+        method: "POST",
+        headers: this.headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+        signal: controller.signal,
+        redirect: "manual",
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw failure(response.status);
+      }
+      return JSON.parse(await readBodyLimited(response, this.maxResponseBytes));
+    } catch (error) {
+      throw error instanceof Error && error.message.startsWith("Hotwash write failed") ? error : failure();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  createCase(body: { title: string; description: string; severity: number; tlp: number; pap: number; tags: string[] }): Promise<unknown> {
+    return this.thehiveWrite("create_case", body);
+  }
+
+  addCaseObservable(body: { case_id: string; data_type: string; data: string; message?: string; tlp: number; ioc: boolean }): Promise<unknown> {
+    return this.thehiveWrite("add_observable", body);
+  }
+
+  addCaseComment(body: { case_id: string; message: string }): Promise<unknown> {
+    return this.thehiveWrite("add_comment", body);
+  }
+
+  runAnalyzer(body: { artifact_id: string; analyzer_id: string }): Promise<unknown> {
+    return this.thehiveWrite("run_analyzer", body);
+  }
+
   private readPageQuery(page: { offset?: number; limit?: number }): string {
     const params = new URLSearchParams();
     if (page.offset !== undefined) params.set("offset", String(page.offset));

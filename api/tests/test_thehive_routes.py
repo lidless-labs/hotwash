@@ -233,6 +233,57 @@ def test_add_observable_action_happy_path(client, configured_thehive, api_key):
     )
 
 
+def test_add_comment_action_happy_path(client, configured_thehive, api_key):
+    with patch(
+        "api.integrations.connectors.resolve_and_pin_integration_url",
+        side_effect=lambda url: PinnedURL(url=url, hostname=None, host_header=None),
+    ), \
+         patch("api.integrations.connectors.TheHiveClient") as MockClient:
+        MockClient.return_value.add_comment.return_value = {"_id": "~M1"}
+        resp = _call_action(
+            client, api_key, "add_comment", {"case_id": "~123", "message": "triage note"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["comment_id"] == "~M1"
+    MockClient.return_value.add_comment.assert_called_once_with(
+        case_id="~123", message="triage note"
+    )
+
+
+def test_add_comment_rejects_invalid_payloads(client, configured_thehive, api_key):
+    for payload in [
+        {"case_id": "~1/../x", "message": "note"},
+        {"case_id": "~1", "message": ""},
+        {"case_id": "~1", "message": "x" * 8001},
+        {"case_id": "~1", "message": "note", "external": True},
+        {"message": "note"},
+    ]:
+        assert _call_action(client, api_key, "add_comment", payload).status_code == 422
+
+
+def test_add_comment_requires_api_key(client, configured_thehive):
+    resp = client.post(
+        "/api/integrations/thehive/actions/add_comment",
+        json={"case_id": "~1", "message": "note"},
+    )
+    assert resp.status_code in (401, 403)
+
+
+def test_add_comment_rejects_when_mock_mode(client, temp_db, api_key):
+    from api.integrations.config import Integration
+
+    with temp_db() as session:
+        i = session.query(Integration).filter_by(tool_name="thehive").first()
+        i.enabled = True
+        i.mock_mode = True
+        i.base_url = "http://example:9000"
+        session.commit()
+    resp = _call_action(client, api_key, "add_comment", {"case_id": "~1", "message": "note"})
+    assert resp.status_code == 400
+    assert "mock" in resp.json()["detail"].lower()
+
+
 def test_action_payload_validation_422(client, configured_thehive, api_key):
     resp = _call_action(client, api_key, "create_case", {"description": "y"})
     assert resp.status_code == 422

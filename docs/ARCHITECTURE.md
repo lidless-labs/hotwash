@@ -333,7 +333,7 @@ Implemented connectors:
 
 - `thehive`: wraps the existing live `create_case`, `create_alert`, and
   `add_observable` actions with the same request and response shapes as the
-  legacy routes, plus `run_analyzer`, which launches a Cortex analyzer job on an
+  legacy routes, plus `add_comment` (an internal case comment) and `run_analyzer`, which launches a Cortex analyzer job on an
   observable through TheHive's Cortex link.
 - `http_webhook`: exposes `post_json`, joins an optional relative `path` to the
   integration `base_url`, posts the provided JSON `body`, honors `verify_ssl`,

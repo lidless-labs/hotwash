@@ -30,6 +30,21 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   array, and `hotwash_list_suggestions` caps `limit` at 200.
 
 ### Added
+- TheHive `add_comment` SOAR action: appends an internal comment (1 to 8000
+  characters) to a case through
+  `POST /integrations/thehive/actions/add_comment`, with strict id and message
+  validation, a client method, connector dispatch, mock response, and docs. It
+  refuses mock mode like the other write actions.
+- `hotwash-mcp` 0.4.0: four bounded TheHive write tools for SOC triage,
+  `hotwash_create_case`, `hotwash_add_case_observable`,
+  `hotwash_add_case_comment` and `hotwash_run_analyzer`. Each needs
+  `HOTWASH_MCP_ALLOW_MUTATIONS=true` and `confirm: true`. Cases are capped at
+  severity 2 and TLP/PAP AMBER and always carry the `soc-bot` tag. Observables
+  are limited to complete md5/sha1/sha256 hashes and file paths. Analyzer
+  launches are limited to an operator allowlist
+  (`HOTWASH_MCP_ANALYZER_ALLOWLIST`, default `CIRCLHashlookup_1_1` and
+  `MISP_2_1`) and to hash observables proven to belong to the case. There are
+  no update, delete, merge, close or share tools.
 - TheHive `run_analyzer` SOAR action: launches a Cortex analyzer on an
   observable through TheHive's Cortex link
   (`POST /integrations/thehive/actions/run_analyzer`), with strict id

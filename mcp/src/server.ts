@@ -1,20 +1,21 @@
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HotwashClient } from "./client.js";
-import { getConfig, type HotwashConfig } from "./config.js";
+import { DEFAULT_ANALYZER_ALLOWLIST, getConfig, type HotwashConfig } from "./config.js";
 import { registerArtifactTools } from "./tools/artifacts.js";
 import { registerPlaybookTools } from "./tools/playbooks.js";
 import { registerRunTools } from "./tools/runs.js";
 import { registerSuggestionTools } from "./tools/suggestions.js";
 import { registerSocTools } from "./tools/soc.js";
+import { registerSocWriteTools } from "./tools/soc-writes.js";
 
 // Protocol registrations and client configuration belong to one MCP session.
 export function createMcpServer(config: HotwashConfig = getConfig()): McpServer {
   const server = new McpServer({
     name: "hotwash-mcp",
-    version: "0.3.0",
+    version: "0.4.0",
     description:
-      "Drive Hotwash incident response playbooks: list playbooks, start runs against incidents, advance steps, attach evidence, query timelines, and review the Wazuh ingest suggestion queue. Wraps the Hotwash REST API.",
+      "Drive Hotwash incident response playbooks: list playbooks, start runs against incidents, advance steps, attach evidence, query timelines, review the Wazuh ingest suggestion queue, and create bounded TheHive triage cases. Wraps the Hotwash REST API.",
   }, {
     // Bound collection validation work before Zod parses free-form run context.
     maxToolInputElements: 10_000,
@@ -28,6 +29,7 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   registerArtifactTools(server, client, policy);
   registerSuggestionTools(server, client, policy);
   registerSocTools(server, client);
+  registerSocWriteTools(server, client, policy, config.analyzerAllowlist ?? [...DEFAULT_ANALYZER_ALLOWLIST]);
 
   return server;
 }
