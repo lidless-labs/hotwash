@@ -28,7 +28,10 @@ const noBinaryControl = (value: string) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.t
 
 const confirm = z.literal(true).describe("Must be true. Acknowledges this call writes to TheHive.");
 const marking = z.number().int().min(0).max(MAX_MARKING);
-const tag = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\s\S])/);
+// 128 covers the finding and rootcheck association tags (hotwash:finding:v1:<64 hex>,
+// hotwash:rootcheck:v2:<scope>:<64 hex>) that api/services/soc_cases.py matches.
+export const MAX_TAG_CHARS = 128;
+const tag = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?![\s\S])/);
 const analyzerName = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+(?![\s\S])/);
 
 const createCaseInput = z.object({

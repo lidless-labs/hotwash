@@ -110,7 +110,7 @@ test("create_case enforces severity, TLP, PAP, tag and text bounds before HTTP",
   const tooMany = Array.from({ length: 16 }, (_, i) => `t${i}`);
   for (const bad of [
     { severity: 3 }, { severity: 0 }, { severity: 1.5 }, { tlp: 3 }, { tlp: -1 }, { pap: 3 },
-    { tags: ["bad tag"] }, { tags: ["x".repeat(65)] }, { tags: tooMany }, { tags: [""] },
+    { tags: ["bad tag"] }, { tags: ["x".repeat(129)] }, { tags: tooMany }, { tags: [""] },
     { title: "" }, { title: "   " }, { title: "x".repeat(201) }, { title: "a\nb" },
     { description: "" }, { description: "x".repeat(8001) }, { description: "a\u0000b" },
   ]) {
@@ -118,6 +118,9 @@ test("create_case enforces severity, TLP, PAP, tag and text bounds before HTTP",
     assert.equal(result.isError, true, JSON.stringify(bad).slice(0, 80));
   }
   assert.equal(seen.length, 0);
+  const associationTags = ["hotwash:finding:v1:" + "a".repeat(64), "hotwash:rootcheck:v2:group:" + "b".repeat(64), "hotwash:rootcheck:v2:path:" + "c".repeat(64)];
+  assert.notEqual((await client.callTool({ name: "hotwash_create_case", arguments: { ...base, tags: associationTags } })).isError, true, "association tags");
+  assert.deepEqual((seen.at(-1)!.body as { tags: string[] }).tags, [...associationTags, "soc-bot"]);
   for (const good of [{ severity: 2, tlp: 2, pap: 2 }, { title: "x".repeat(200) }, { description: "x".repeat(8000) }, { tags: tooMany.slice(0, 15) }]) {
     assert.notEqual((await client.callTool({ name: "hotwash_create_case", arguments: { ...base, ...good } })).isError, true, JSON.stringify(good).slice(0, 80));
   }
