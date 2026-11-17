@@ -47,12 +47,12 @@ const validCalls: [string, Record<string, unknown>][] = [
 // --- gates -----------------------------------------------------------------
 
 for (const [name, args] of validCalls) {
-  test(`${name} is refused unless the operator enabled mutations`, async () => {
+  test(`${name} is not registered without the mutation opt-in`, async () => {
     const seen = record(() => json({}));
     const client = await connect({ allowMutations: false });
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true);
-    assert.match(JSON.stringify(result.content), /HOTWASH_MCP_ALLOW_MUTATIONS/);
+    assert.match(JSON.stringify(result.content), /not found/i);
     assert.equal(seen.length, 0, "no backend request may be made");
   });
 

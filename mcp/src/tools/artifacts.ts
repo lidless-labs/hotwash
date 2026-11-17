@@ -35,6 +35,8 @@ function artifactBytes(text: string | undefined, base64: string | undefined): Bu
 }
 
 export function registerArtifactTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
+  // Read-only servers must not list a state-changing tool at all.
+  if (!policy?.allowMutations) return;
   server.tool(
     "hotwash_attach_artifact",
     "Attach a text or base64-encoded binary artifact (e.g. a log snippet, screenshot, hash list) to a step in a running execution. Either text or base64 must be provided.",

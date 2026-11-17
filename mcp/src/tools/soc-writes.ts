@@ -112,6 +112,8 @@ export function registerSocWriteTools(
   policy: ToolPolicy | undefined,
   analyzerAllowlist: Readonly<Record<string, string>>,
 ): void {
+  // Read-only servers must not list a state-changing tool at all.
+  if (!policy?.allowMutations) return;
   const allowed = new Map(Object.entries(analyzerAllowlist));
 
   server.registerTool("hotwash_create_case", {

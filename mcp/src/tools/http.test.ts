@@ -58,12 +58,14 @@ test("health exposes only liveness without a token", async () => {
   assert.equal(response.status, 200);
   assert.equal(await response.text(), '{"status":"ok"}');
 });
-test("lists tools and invalidates a terminated session", async () => {
+test("lists only read-only tools without the mutation opt-in", async () => {
   configure();
   const url = await start();
   const { client, transport } = await connect(url);
   const { tools } = await client.listTools();
-  assert.ok(tools.some(t => t.name === "hotwash_start_run"));
+  assert.ok(tools.some(t => t.name === "hotwash_list_playbooks"));
+  assert.equal(tools.some(t => t.name === "hotwash_start_run"), false);
+  assert.equal(tools.some(t => t.name === "hotwash_create_playbook"), false);
   for (const tool of tools) {
     assert.equal("$schema" in tool.inputSchema, false);
     if (tool.outputSchema) assert.equal("$schema" in tool.outputSchema, false);
@@ -138,9 +140,23 @@ for (const host of ["0.0.0.0", "::", "[::]"]) {
 test("refuses a write-enabled server on a non-loopback bind", async () => {
   configure();
   process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
-  // RFC 5737 documentation address: never loopback, never bindable here.
-  process.env.HOTWASH_MCP_HTTP_HOST = "192.0.2.10";
+  // Binds, but the kernel reports the IPv4-mapped form, which is not a
+  // loopback literal. A pre-bind hostname check would have accepted it.
+  process.env.HOTWASH_MCP_HTTP_HOST = "::ffff:127.0.0.1";
   await assert.rejects(createHttpServer(), /loopback/);
+});
+test("localhost binds loopback and enables writes with the opt-in", async () => {
+  configure();
+  process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
+  process.env.HOTWASH_MCP_HTTP_HOST = "localhost";
+  http = await createHttpServer();
+  assert.equal(http.writesEnabled, true);
+  assert.ok(["127.0.0.1", "::1"].includes(http.host), http.host);
+  const base = `http://${http.host.includes(":") ? `[${http.host}]` : http.host}:${http.port}`;
+  const { client } = await connect(base);
+  const names = (await client.listTools()).tools.map(t => t.name);
+  assert.ok(names.includes("hotwash_start_run"));
+  assert.ok(names.includes("hotwash_update_playbook"));
 });
 test("grants the write capability only to a loopback bind with the opt-in", async () => {
   configure();
@@ -156,7 +172,7 @@ test("accepts a token with surrounding whitespace from a secrets file", async ()
   configure();
   process.env.HOTWASH_MCP_HTTP_TOKEN = `  ${token}\n`;
   const { client } = await connect(await start());
-  assert.ok((await client.listTools()).tools.some(tool => tool.name === "hotwash_start_run"));
+  assert.ok((await client.listTools()).tools.some(tool => tool.name === "hotwash_list_playbooks"));
 });
 for (const port of ["-1", "65536", "abc", "1.5", "3118suffix"]) {
   test(`refuses invalid port ${port}`, async () => {

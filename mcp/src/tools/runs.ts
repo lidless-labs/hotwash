@@ -94,40 +94,42 @@ export function registerRunTools(server: McpServer, client: HotwashClient, polic
     } catch { return fail(new Error(`Hotwash read failed; run ${execution_id} report unavailable`)); }
   });
 
-  server.tool(
-    "hotwash_start_run",
-    "Start a new playbook execution for an incident. The playbook's nodes are cloned into per-step state (not_started). Returns the new execution id and step counters; pair with query_run to inspect the steps.",
-    {
-      playbook_id: z.number().int().positive().describe("Playbook id from list_playbooks."),
-      incident_title: z.string().min(1).describe("Short human-readable title, e.g. 'Ransomware on PROD-DB-01'."),
-      incident_id: z.string().optional().describe("External incident reference (ticket id, alert id, etc.)."),
-      started_by: z.string().optional().describe("Analyst or system identifier kicking off the run."),
-      context: z.record(z.string(), z.any()).optional().describe("Free-form context attached to the run, e.g. a Wazuh alert payload, IOC list, or hostname."),
-    },
-    mutatingTool({ destructive: false, idempotent: false }),
-    async (args) => {
-      const blocked = guardMutation(policy, "start a run");
-      if (blocked) return blocked;
-      try {
-        const summary = await client.startRun(args);
-        return ok(
-          {
-            execution_id: summary.id,
-            status: summary.status,
-            incident_title: summary.incident_title,
-            playbook_id: summary.playbook_id,
-            playbook_title: summary.playbook_title ?? null,
-            steps_total: summary.steps_total,
-            steps_completed: summary.steps_completed,
-            started_at: summary.started_at,
-          },
-          ["playbook_title"],
-        );
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+  if (policy?.allowMutations) {
+    server.tool(
+      "hotwash_start_run",
+      "Start a new playbook execution for an incident. The playbook's nodes are cloned into per-step state (not_started). Returns the new execution id and step counters; pair with query_run to inspect the steps.",
+      {
+        playbook_id: z.number().int().positive().describe("Playbook id from list_playbooks."),
+        incident_title: z.string().min(1).describe("Short human-readable title, e.g. 'Ransomware on PROD-DB-01'."),
+        incident_id: z.string().optional().describe("External incident reference (ticket id, alert id, etc.)."),
+        started_by: z.string().optional().describe("Analyst or system identifier kicking off the run."),
+        context: z.record(z.string(), z.any()).optional().describe("Free-form context attached to the run, e.g. a Wazuh alert payload, IOC list, or hostname."),
+      },
+      mutatingTool({ destructive: false, idempotent: false }),
+      async (args) => {
+        const blocked = guardMutation(policy, "start a run");
+        if (blocked) return blocked;
+        try {
+          const summary = await client.startRun(args);
+          return ok(
+            {
+              execution_id: summary.id,
+              status: summary.status,
+              incident_title: summary.incident_title,
+              playbook_id: summary.playbook_id,
+              playbook_title: summary.playbook_title ?? null,
+              steps_total: summary.steps_total,
+              steps_completed: summary.steps_completed,
+              started_at: summary.started_at,
+            },
+            ["playbook_title"],
+          );
+        } catch (error) {
+          return fail(error);
+        }
+      },
+    );
+  }
 
   server.tool(
     "hotwash_query_run",
@@ -168,77 +170,81 @@ export function registerRunTools(server: McpServer, client: HotwashClient, polic
     },
   );
 
-  server.tool(
-    "hotwash_advance_step",
-    "Update a single step in an execution: change status, assign an analyst, append a note, or record a decision. Returns the refreshed execution detail.",
-    {
-      execution_id: z.number().int().positive(),
-      node_id: z.string().min(1).describe("The step's node_id from query_run."),
-      status: z.enum(STEP_STATUSES).optional().describe("New step status. 'completed' and 'skipped' set completed_at; 'in_progress' sets started_at on first transition."),
-      assignee: z.string().optional().describe("Analyst handling this step. Empty string clears."),
-      note: z.string().optional().describe("Append a free-form note to the step's note list."),
-      decision_taken: z.string().optional().describe("For decision nodes, which option was chosen (must be one of decision_options)."),
-    },
-    mutatingTool({ destructive: true, idempotent: false }),
-    async ({ execution_id, node_id, status, assignee, note, decision_taken }) => {
-      const blocked = guardMutation(policy, "update this step");
-      if (blocked) return blocked;
-      try {
-        const detail = await client.advanceStep(execution_id, node_id, {
-          status,
-          assignee,
-          notes: note,
-          decision_taken,
-        });
-        const updated = detail.steps.find((s) => s.node_id === node_id);
-        return ok(
-          {
-            execution: detail.execution,
-            step: updated ?? null,
-          },
-          [
-            "execution.incident_title",
-            "execution.incident_id",
-            "execution.playbook_title",
-            "step.node_label",
-            "step.assignee",
-            "step.notes",
-            "step.decision_options",
-            "step.evidence",
-          ],
-        );
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
-
-  server.tool(
-    "hotwash_cancel_run",
-    "Abandon an in-progress execution. Sets status=abandoned and stamps completed_at; the run remains queryable for the audit log. Destructive: requires confirm: true.",
-    {
-      execution_id: z.number().int().positive(),
-      reason: z.string().optional().describe("Free-form reason recorded as an execution note."),
-      confirm: z.literal(true).describe("Must be true. Acknowledges the run will be marked abandoned."),
-    },
-    mutatingTool({ destructive: true, idempotent: false }),
-    async ({ execution_id, reason, confirm }) => {
-      const blocked = guardMutation(policy, "abandon this execution");
-      if (blocked) return blocked;
-      if (!confirm) return refuseUnconfirmed("abandon this execution");
-      try {
-        if (reason) {
-          await client.patchExecution(execution_id, { notes: reason });
+  if (policy?.allowMutations) {
+    server.tool(
+      "hotwash_advance_step",
+      "Update a single step in an execution: change status, assign an analyst, append a note, or record a decision. Returns the refreshed execution detail.",
+      {
+        execution_id: z.number().int().positive(),
+        node_id: z.string().min(1).describe("The step's node_id from query_run."),
+        status: z.enum(STEP_STATUSES).optional().describe("New step status. 'completed' and 'skipped' set completed_at; 'in_progress' sets started_at on first transition."),
+        assignee: z.string().optional().describe("Analyst handling this step. Empty string clears."),
+        note: z.string().optional().describe("Append a free-form note to the step's note list."),
+        decision_taken: z.string().optional().describe("For decision nodes, which option was chosen (must be one of decision_options)."),
+      },
+      mutatingTool({ destructive: true, idempotent: false }),
+      async ({ execution_id, node_id, status, assignee, note, decision_taken }) => {
+        const blocked = guardMutation(policy, "update this step");
+        if (blocked) return blocked;
+        try {
+          const detail = await client.advanceStep(execution_id, node_id, {
+            status,
+            assignee,
+            notes: note,
+            decision_taken,
+          });
+          const updated = detail.steps.find((s) => s.node_id === node_id);
+          return ok(
+            {
+              execution: detail.execution,
+              step: updated ?? null,
+            },
+            [
+              "execution.incident_title",
+              "execution.incident_id",
+              "execution.playbook_title",
+              "step.node_label",
+              "step.assignee",
+              "step.notes",
+              "step.decision_options",
+              "step.evidence",
+            ],
+          );
+        } catch (error) {
+          return fail(error);
         }
-        const summary = await client.patchExecution(execution_id, { status: "abandoned", confirm: true });
-        return ok({
-          execution_id: summary.id,
-          status: summary.status,
-          completed_at: summary.completed_at,
-        });
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+      },
+    );
+  }
+
+  if (policy?.allowMutations) {
+    server.tool(
+      "hotwash_cancel_run",
+      "Abandon an in-progress execution. Sets status=abandoned and stamps completed_at; the run remains queryable for the audit log. Destructive: requires confirm: true.",
+      {
+        execution_id: z.number().int().positive(),
+        reason: z.string().optional().describe("Free-form reason recorded as an execution note."),
+        confirm: z.literal(true).describe("Must be true. Acknowledges the run will be marked abandoned."),
+      },
+      mutatingTool({ destructive: true, idempotent: false }),
+      async ({ execution_id, reason, confirm }) => {
+        const blocked = guardMutation(policy, "abandon this execution");
+        if (blocked) return blocked;
+        if (!confirm) return refuseUnconfirmed("abandon this execution");
+        try {
+          if (reason) {
+            await client.patchExecution(execution_id, { notes: reason });
+          }
+          const summary = await client.patchExecution(execution_id, { status: "abandoned", confirm: true });
+          return ok({
+            execution_id: summary.id,
+            status: summary.status,
+            completed_at: summary.completed_at,
+          });
+        } catch (error) {
+          return fail(error);
+        }
+      },
+    );
+  }
 }

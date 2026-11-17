@@ -24,6 +24,8 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   const client = new HotwashClient(config);
   // Two independent conditions: the operator opt-in, and the loopback-HTTP
   // write capability that only http.ts grants. stdio never has the latter.
+  // Every register* call omits its state-changing tools when this is false, so
+  // a read-only server does not list them at all.
   const policy = { allowMutations: config.allowMutations === true && config.writesEnabled === true };
 
   registerPlaybookTools(server, client);

@@ -36,10 +36,12 @@ const update = { playbook_id: 7, title: "Revised", confirm: true };
 const owned = { id: 7, updated_at: "2026-01-01T00:00:00", tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }] };
 const calls: [string, Record<string, unknown>][] = [["hotwash_create_playbook", create], ["hotwash_update_playbook", update]];
 for (const [name, args] of calls) {
-  test(`${name} refuses disabled mutations before any read or write`, async () => {
+  test(`${name} is not registered without the mutation opt-in`, async () => {
     const seen = record(() => json(owned));
     const client = await connect(false);
-    assert.equal((await client.callTool({ name, arguments: args })).isError, true);
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result.content), /not found/i);
     assert.equal(seen.length, 0);
   });
   test(`${name} requires literal confirmation and strict fields`, async () => {
@@ -133,7 +135,8 @@ test("valid boundary sizes are accepted and metadata controls are refused", asyn
   const seen = record(() => json(owned));
   const result = await client.callTool({ name: calls[0][0], arguments: {
     title: "t".repeat(200), description: "d".repeat(8000), category: "c".repeat(100),
-    content_markdown: "m".repeat(100000), tags: Array.from({ length: 18 }, (_, i) => String(i).padEnd(100, "t")), confirm: true,
+    // 16 supplied + the two mandatory tags is the 18-tag limit.
+    content_markdown: "m".repeat(100000), tags: Array.from({ length: 16 }, (_, i) => String(i).padEnd(100, "t")), confirm: true,
   } });
   assert.notEqual(result.isError, true);
   assert.equal(seen.length, 1);
@@ -141,6 +144,32 @@ test("valid boundary sizes are accepted and metadata controls are refused", asyn
     assert.equal((await client.callTool({ name: calls[0][0], arguments: { ...create, [field]: "bad\nline" } })).isError, true);
   }
   assert.equal(seen.length, 1);
+});
+
+test("create refuses a tag list that the mandatory tags push over the limit", async () => {
+  const seen = record(() => json(owned));
+  const client = await connect();
+  const result = await client.callTool({ name: calls[0][0], arguments: {
+    ...create, tags: Array.from({ length: 17 }, (_, i) => `tag-${i}`),
+  } });
+  assert.equal(result.isError, true);
+  // 17 supplied + soc-bot + draft = 19, refused before the API can answer 422.
+  assert.match(JSON.stringify(result.content), /19 tags exceed the 18-tag limit/);
+  assert.doesNotMatch(JSON.stringify(result.content), /outcome not confirmed/);
+  assert.equal(seen.length, 0);
+});
+
+test("update refuses a merged tag list over the limit before the PUT", async () => {
+  const seen = record(() => json(owned));
+  const client = await connect();
+  const result = await client.callTool({ name: calls[1][0], arguments: {
+    ...update, tags: Array.from({ length: 17 }, (_, i) => `tag-${i}`),
+  } });
+  assert.equal(result.isError, true);
+  // existing soc-bot + draft, 17 new, soc-bot deduplicated = 19.
+  assert.match(JSON.stringify(result.content), /19 tags exceed the 18-tag limit/);
+  assert.doesNotMatch(JSON.stringify(result.content), /outcome not confirmed/);
+  assert.deepEqual(seen.map(s => s.method), ["GET"]);
 });
 
 // --- optimistic concurrency and the loopback write capability --------------
@@ -170,10 +199,12 @@ test("a 409 from the playbook PUT is reported as a conflict, not an unconfirmed 
 test("writes need the loopback capability, not only the operator opt-in", async () => {
   const seen = record(() => json(owned));
   const client = await connect(true, false);
+  const listed = (await client.listTools()).tools.map(tool => tool.name);
   for (const [name, args] of calls) {
+    assert.equal(listed.includes(name), false, name);
     const result = await client.callTool({ name, arguments: args });
-    assert.equal(result.isError, true, name);
-    assert.match(JSON.stringify(result.content), /loopback/);
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result.content), /not found/i);
   }
   assert.equal(seen.length, 0, "no backend request may be made");
 });

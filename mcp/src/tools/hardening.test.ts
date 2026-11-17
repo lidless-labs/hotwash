@@ -90,22 +90,29 @@ test("list and query tools return typed, labeled, bounded content", async () => 
 
 // --- annotations --------------------------------------------------------------
 
-test("every tool declares all four annotation hints, matching its behavior", async () => {
+const READ_ONLY_TOOLS = ["hotwash_list_playbooks", "hotwash_get_playbook", "hotwash_query_run", "hotwash_list_suggestions",
+  "hotwash_list_runs", "hotwash_get_run_report", "hotwash_list_cases", "hotwash_get_case",
+  "hotwash_list_case_observables", "hotwash_list_case_comments", "hotwash_get_analyzer_job", "hotwash_check_finding"];
+const MUTATING_TOOLS = ["hotwash_create_playbook", "hotwash_update_playbook", "hotwash_start_run", "hotwash_advance_step", "hotwash_cancel_run", "hotwash_attach_artifact", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion",
+  "hotwash_create_case", "hotwash_add_case_observable", "hotwash_add_case_comment", "hotwash_run_analyzer"];
+
+test("a read-only server lists only the read-only tools", async () => {
   const client = await connect();
   const { tools } = await client.listTools();
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), [...READ_ONLY_TOOLS].sort());
+});
+
+test("a write-enabled server lists the full tool set with all four annotation hints", async () => {
+  const client = await connect({ allowMutations: true });
+  const { tools } = await client.listTools();
   const byName = new Map(tools.map((tool) => [tool.name, tool.annotations]));
-  const readOnly = ["hotwash_list_playbooks", "hotwash_get_playbook", "hotwash_query_run", "hotwash_list_suggestions",
-    "hotwash_list_runs", "hotwash_get_run_report", "hotwash_list_cases", "hotwash_get_case",
-    "hotwash_list_case_observables", "hotwash_list_case_comments", "hotwash_get_analyzer_job", "hotwash_check_finding"];
-  const mutating = ["hotwash_create_playbook", "hotwash_update_playbook", "hotwash_start_run", "hotwash_advance_step", "hotwash_cancel_run", "hotwash_attach_artifact", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion",
-    "hotwash_create_case", "hotwash_add_case_observable", "hotwash_add_case_comment", "hotwash_run_analyzer"];
-  assert.deepEqual([...byName.keys()].sort(), [...readOnly, ...mutating].sort());
+  assert.deepEqual([...byName.keys()].sort(), [...READ_ONLY_TOOLS, ...MUTATING_TOOLS].sort());
   for (const [name, hints] of byName) {
     for (const key of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const) {
       assert.equal(typeof hints?.[key], "boolean", `${name} missing ${key}`);
     }
     assert.equal(hints?.openWorldHint, false, name);
-    assert.equal(hints?.readOnlyHint, readOnly.includes(name), name);
+    assert.equal(hints?.readOnlyHint, READ_ONLY_TOOLS.includes(name), name);
   }
   for (const name of ["hotwash_cancel_run", "hotwash_accept_suggestion", "hotwash_dismiss_suggestion"]) {
     assert.equal(byName.get(name)?.destructiveHint, true, name);
@@ -130,7 +137,7 @@ const MUTATING_CALLS: [string, Record<string, unknown>][] = [
 ];
 
 for (const [name, args] of MUTATING_CALLS) {
-  test(`${name} is refused unless the operator enabled mutations`, async () => {
+  test(`${name} is not registered on a read-only server`, async () => {
     let calls = 0;
     globalThis.fetch = async () => {
       calls += 1;
@@ -139,16 +146,15 @@ for (const [name, args] of MUTATING_CALLS) {
     const client = await connect({ allowMutations: false });
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true);
-    assert.match(JSON.stringify(result.content), /HOTWASH_MCP_ALLOW_MUTATIONS/);
+    assert.match(JSON.stringify(result.content), /not found/i);
     assert.equal(calls, 0, "no backend request may be made");
   });
 }
 
 test("mutations default to disabled when the config does not say otherwise", async () => {
-  globalThis.fetch = async () => json({});
-  const client = await connect();
-  const result = await client.callTool({ name: "hotwash_start_run", arguments: { playbook_id: 1, incident_title: "t" } });
-  assert.equal(result.isError, true);
+  const client = await connect({ allowMutations: undefined });
+  const { tools } = await client.listTools();
+  assert.equal(tools.some((tool) => tool.name === "hotwash_start_run"), false);
 });
 
 test("read-only tools keep working while mutations are disabled", async () => {

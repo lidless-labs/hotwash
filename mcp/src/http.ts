@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer, stripToolSchemaDialect } from "./server.js";
-import { getConfig } from "./config.js";
+import { getConfig, type HotwashConfig } from "./config.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_SESSIONS = 128;
@@ -105,11 +105,6 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   if (["0.0.0.0", "::", "[::]"].includes(host.trim())) {
     throw new Error("HOTWASH_MCP_HTTP_HOST must be a specific address, not a wildcard; bind the interface clients will use");
   }
-  // Writes are tied to the dedicated loopback listener. Refuse to start rather
-  // than run a write-enabled server where other hosts can reach it.
-  if (cfg.allowMutations === true && !isWritableBind(host)) {
-    throw new Error("HOTWASH_MCP_ALLOW_MUTATIONS requires a loopback bind (HOTWASH_MCP_HTTP_HOST=127.0.0.1 or ::1); refusing to start a write-enabled server on a non-loopback address");
-  }
   const portValue = env.HOTWASH_MCP_HTTP_PORT ?? "3118";
   if (!/^\d+$/.test(portValue) || Number(portValue) > 65535) {
     throw new Error("HOTWASH_MCP_HTTP_PORT must be an integer from 0 to 65535");
@@ -125,6 +120,14 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   // Includes initializations in flight, so both capacity and shutdown cover them.
   const resources = new Set<Session>();
   let closing = false;
+  // Writes are decided only after the listener binds, because the kernel's
+  // address is authoritative (a hostname such as localhost can resolve
+  // elsewhere). Handlers await this gate, so they can never read the write
+  // configuration before it exists.
+  let releaseReady!: () => void;
+  const ready = new Promise<void>((resolve) => { releaseReady = resolve; });
+  let writesEnabled = false;
+  let sessionConfig: HotwashConfig = { ...cfg, writesEnabled: false };
   const dispose = async (session: Session): Promise<void> => {
     resources.delete(session);
     if (session.transport.sessionId) sessions.delete(session.transport.sessionId);
@@ -132,6 +135,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    await ready;
     if (closing) return send(response, 503, "Service unavailable");
     if (!validHost(request.headers.host, host) || !validOrigin(request.headers.origin)) {
       return send(response, 403, "Forbidden");
@@ -209,15 +213,28 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
     listener.listen(port, host, () => { listener.off("error", reject); resolve(); });
   });
   const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("HTTP listener did not bind a TCP port");
+  if (!address || typeof address === "string") {
+    closing = true;
+    releaseReady();
+    const stopped = new Promise<void>((resolve) => listener.close(() => resolve()));
+    listener.closeAllConnections();
+    await stopped;
+    throw new Error("HTTP listener did not bind a TCP port");
+  }
   // Authoritative check: the kernel reports the address actually bound, so a
-  // hostname that resolved elsewhere can never smuggle in write tools.
+  // hostname such as localhost that resolved elsewhere can never smuggle in
+  // write tools. A literal 127.0.0.1 or ::1 bind passes; anything else refuses.
   if (cfg.allowMutations === true && !isWritableBind(address.address)) {
-    await new Promise<void>((resolve) => listener.close(() => resolve()));
+    closing = true;
+    releaseReady();
+    const stopped = new Promise<void>((resolve) => listener.close(() => resolve()));
+    listener.closeAllConnections();
+    await stopped;
     throw new Error("HOTWASH_MCP_ALLOW_MUTATIONS requires a loopback bind (127.0.0.1 or ::1); refusing to start a write-enabled server on a non-loopback address");
   }
-  const writesEnabled = cfg.allowMutations === true;
-  const sessionConfig = { ...cfg, writesEnabled };
+  writesEnabled = cfg.allowMutations === true;
+  sessionConfig = { ...cfg, writesEnabled };
+  releaseReady();
   const reaper = setInterval(() => {
     for (const session of resources) {
       if (session.active === 0 && Date.now() - session.lastUsed > SESSION_IDLE_MS) {
