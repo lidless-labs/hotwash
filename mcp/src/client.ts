@@ -150,6 +150,34 @@ export class HotwashClient {
     return this.request<PlaybookDetail>(`/api/playbooks/${id}`);
   }
 
+  createPlaybook(body: { title: string; description?: string; category?: string; tags?: string[]; content_markdown: string }): Promise<unknown> {
+    return this.playbookWrite("/api/playbooks", "POST", body);
+  }
+
+  updatePlaybook(id: number, body: { title?: string; description?: string; category?: string; tags?: string[]; content_markdown?: string }): Promise<unknown> {
+    return this.playbookWrite(`/api/playbooks/${id}`, "PUT", body);
+  }
+
+  // Never replay a write through redirects or expose backend error text.
+  private async playbookWrite(path: string, method: "POST" | "PUT", body: object): Promise<unknown> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method, body: JSON.stringify(body), redirect: "manual", signal: controller.signal,
+        headers: this.headers({ "Content-Type": "application/json" }),
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(`Hotwash playbook write failed (HTTP ${response.status}); outcome not confirmed, inspect playbooks before retrying`);
+      }
+      return JSON.parse(await readBodyLimited(response, this.maxResponseBytes));
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Hotwash playbook write failed")) throw error;
+      throw new Error("Hotwash playbook write outcome not confirmed; inspect playbooks before retrying");
+    } finally { clearTimeout(timer); }
+  }
+
   startRun(payload: {
     playbook_id: number;
     incident_title: string;
