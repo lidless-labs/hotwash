@@ -30,6 +30,10 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   array, and `hotwash_list_suggestions` caps `limit` at 200.
 
 ### Added
+- MCP `hotwash_create_playbook` and `hotwash_update_playbook`: bounded Markdown
+  authoring with operator mutation gating, literal confirmation, strict fields,
+  mandatory `soc-bot`/`draft` tags on create, and updates limited to targets
+  already tagged `soc-bot`.
 - TheHive `add_comment` SOAR action: appends an internal comment (1 to 8000
   characters) to a case through
   `POST /integrations/thehive/actions/add_comment`, with strict id and message

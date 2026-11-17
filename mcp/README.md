@@ -11,6 +11,8 @@ Version 0.3.0 adds `hotwash_dismiss_suggestion`, completing the suggestion queue
 | Tool | Purpose |
 |------|---------|
 | `hotwash_list_playbooks` | Browse the library, filter by category, tag, or search |
+| `hotwash_create_playbook` | Create a bounded Markdown playbook with `soc-bot` and `draft` tags. Mutation gate and confirmation required |
+| `hotwash_update_playbook` | Update supplied fields only after fetching and verifying the target carries `soc-bot`. Merges tags into the existing set, so soc-bot, draft and human tags are never dropped |
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) for one playbook |
 | `hotwash_start_run` | Begin an execution from a playbook + incident title (+ optional context payload) |
 | `hotwash_query_run` | Get current run state, optionally including the timeline |
@@ -63,6 +65,33 @@ failure reports the HTTP status and that the outcome is unconfirmed, never the
 backend text, URL, address or key. A write is not retried or redirected. Because
 case, observable and comment creation are not idempotent, check the case with
 the read tools before repeating a call that failed.
+
+### Bounded playbook authoring
+
+Both authoring tools require `HOTWASH_MCP_ALLOW_MUTATIONS=true` and literal
+`confirm: true`. The shared read-only listener refuses both before any API
+request. Unknown fields are rejected. These tools do not delete or share.
+
+Create requires `title` and `content_markdown`. `description`, `category` and
+`tags` are optional. It posts to `/api/playbooks` and always adds `soc-bot` and
+`draft`. Update requires a positive safe integer `playbook_id` and at least one
+of those fields. It fetches `/api/playbooks/{id}`, refuses a target without the
+exact `soc-bot` tag, then puts only supplied fields to that route. Omitted fields
+stay unchanged. Replacing tags always retains `soc-bot`. `draft` may be removed
+when the playbook has been reviewed. The ownership check and update are separate
+requests, so operators should avoid concurrent ownership changes.
+
+Limits: title 1 to 200 characters, description up to 8000, category up to 100,
+Markdown 1 to 100000, and up to 18 supplied tags of 1 to 100 characters each.
+Titles, tags and categories reject control characters. Description and Markdown
+allow tabs and line breaks but reject other C0, DEL and C1 controls. Blank titles,
+Markdown and tags are refused. Tags are trimmed and lowercased, internal spaces become hyphens to match the API,
+and tags are deduplicated before mandatory tags are added.
+
+The API parses Markdown into the graph and versions changed content. Responses
+return the playbook ID, plus applied tags for create, without raw backend data.
+Writes are never redirected or retried. If a write fails or returns malformed
+data, inspect the playbook before retrying because it may already have changed.
 
 ### Investigation read contracts
 

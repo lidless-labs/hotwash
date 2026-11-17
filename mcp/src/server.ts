@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HotwashClient } from "./client.js";
 import { getConfig, type HotwashConfig } from "./config.js";
 import { registerArtifactTools } from "./tools/artifacts.js";
-import { registerPlaybookTools } from "./tools/playbooks.js";
+import { registerPlaybookTools, registerPlaybookWriteTools } from "./tools/playbooks.js";
 import { registerRunTools } from "./tools/runs.js";
 import { registerSuggestionTools } from "./tools/suggestions.js";
 import { registerSocTools } from "./tools/soc.js";
@@ -25,6 +25,7 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   const policy = { allowMutations: config.allowMutations === true };
 
   registerPlaybookTools(server, client);
+  registerPlaybookWriteTools(server, client, policy);
   registerRunTools(server, client, policy);
   registerArtifactTools(server, client, policy);
   registerSuggestionTools(server, client, policy);

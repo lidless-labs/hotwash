@@ -1,3 +1,4 @@
+import { guardMutation, mutatingTool, type ToolPolicy } from "./_util.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { HotwashClient } from "../client.js";
@@ -64,4 +65,69 @@ export function registerPlaybookTools(server: McpServer, client: HotwashClient):
       }
     },
   );
+}
+
+// Authoring is confined to tagged playbooks and the fixed REST payload below.
+const singleLine = (max: number, min = 0) => z.string().min(min).max(max)
+  .refine(value => !/[\x00-\x1f\x7f-\x9f]/.test(value), "control characters are not allowed");
+const freeText = (max: number, min = 0) => z.string().min(min).max(max)
+  .refine(value => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(value), "control characters are not allowed");
+const writeFields = {
+  title: singleLine(200, 1).refine(value => value.trim().length > 0, "title must not be blank"),
+  description: freeText(8000).optional(),
+  category: singleLine(100).optional(),
+  tags: z.array(singleLine(100, 1).refine(value => value.trim().length > 0, "tag must not be blank")).max(18).optional(),
+  content_markdown: freeText(100000, 1).refine(value => value.trim().length > 0, "content must not be blank"),
+};
+const confirmed = z.literal(true).describe("Must be true to acknowledge the playbook write.");
+const createInput = z.object({ ...writeFields, confirm: confirmed }).strict();
+const updateInput = z.object({
+  title: writeFields.title.optional(), description: writeFields.description,
+  category: writeFields.category, tags: writeFields.tags,
+  content_markdown: writeFields.content_markdown.optional(),
+  playbook_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), confirm: confirmed,
+}).strict().refine(value => [value.title, value.description, value.category, value.tags, value.content_markdown]
+  .some(field => field !== undefined), "at least one update field is required");
+const resultId = z.object({ id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) });
+
+export function registerPlaybookWriteTools(server: McpServer, client: HotwashClient, policy: ToolPolicy): void {
+  server.registerTool("hotwash_create_playbook", {
+    description: "Create a draft playbook from Markdown. Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Always adds soc-bot and draft tags. Unknown fields are refused. Check existing playbooks before creating; do not retry an unconfirmed write blindly.",
+    inputSchema: createInput, annotations: mutatingTool({ destructive: false, idempotent: false }),
+  }, async args => {
+    const blocked = guardMutation(policy, "create this playbook");
+    if (blocked) return blocked;
+    try {
+      const { confirm: _, ...fields } = args;
+      const tags = [...new Set([...(fields.tags ?? []).map(tag => tag.trim().toLowerCase().replace(/\s+/g, "-")), "soc-bot", "draft"])];
+      const result = resultId.safeParse(await client.createPlaybook({ ...fields, tags }));
+      if (!result.success) throw new Error("Playbook write outcome not confirmed; check playbooks before retrying");
+      return ok({ playbook_id: result.data.id, tags });
+    } catch (error) { return fail(error); }
+  });
+  server.registerTool("hotwash_update_playbook", {
+    description: "Update supplied fields of a playbook already tagged soc-bot. Fetches ownership first and refuses human-authored playbooks. Tags are merged into the existing set: an update can add tags but never removes any (soc-bot and draft stay). Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Unknown fields and empty patches are refused. Check the playbook before retrying an unconfirmed write.",
+    inputSchema: updateInput, annotations: mutatingTool({ destructive: true, idempotent: true }),
+  }, async args => {
+    const blocked = guardMutation(policy, "update this playbook");
+    if (blocked) return blocked;
+    try {
+      const { playbook_id, confirm: _, ...fields } = args;
+      let target;
+      try { target = await client.getPlaybook(playbook_id); }
+      catch { throw new Error("Refusing update: playbook ownership could not be verified"); }
+      if (target?.id !== playbook_id || !Array.isArray(target.tags) || !target.tags.some(tag => tag?.name === "soc-bot")) {
+        throw new Error("Refusing update: target playbook must already carry the soc-bot tag");
+      }
+      // The API replaces the tag list, so merge: an update can add tags but never drop
+      // existing ones (draft, human review markers) and always keeps soc-bot.
+      const existing = target.tags.map(tag => tag?.name).filter((name): name is string => typeof name === "string");
+      const payload = { ...fields, ...(fields.tags === undefined ? {} : {
+        tags: [...new Set([...existing, ...fields.tags.map(tag => tag.trim().toLowerCase().replace(/\s+/g, "-")), "soc-bot"])],
+      }) };
+      const result = resultId.safeParse(await client.updatePlaybook(playbook_id, payload));
+      if (!result.success || result.data.id !== playbook_id) throw new Error("Playbook write outcome not confirmed; inspect the playbook before retrying");
+      return ok({ playbook_id });
+    } catch (error) { return fail(error); }
+  });
 }
