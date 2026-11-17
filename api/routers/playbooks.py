@@ -254,8 +254,8 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
             detail="Playbook changed since it was read; re-read before retrying",
         )
 
-    # Pin the ORM object to the same value so the flush cannot let onupdate
-    # overwrite it with SQLite's second-resolution CURRENT_TIMESTAMP.
+    # Pin the ORM object to the value the conditional UPDATE just wrote so the
+    # later flush of the other columns does not carry a stale timestamp.
     playbook.updated_at = bumped
 
     if content_changed:
@@ -296,6 +296,9 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
 def delete_playbook(playbook_id: int, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
     playbook.is_deleted = True
+    # A soft delete is a write: advance the timestamp exactly like an edit so a
+    # stale read-then-write caller cannot land after it.
+    playbook.updated_at = next_updated_at(playbook.updated_at)
     db.commit()
     return None
 
@@ -377,6 +380,9 @@ def create_share_link(playbook_id: int, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
     token = str(uuid.uuid4())
     playbook.share_token = token
+    # Set the timestamp here rather than leaning on a column ``onupdate``: the
+    # share must move updated_at forward, never back to a whole second.
+    playbook.updated_at = next_updated_at(playbook.updated_at)
     db.commit()
     return ShareResponse(share_url=f"/shared/{token}", token=token)
 
@@ -385,6 +391,7 @@ def create_share_link(playbook_id: int, db: Session = Depends(get_db)):
 def revoke_share_link(playbook_id: int, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
     playbook.share_token = None
+    playbook.updated_at = next_updated_at(playbook.updated_at)
     db.commit()
     return None
 

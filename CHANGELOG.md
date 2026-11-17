@@ -42,9 +42,14 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   `onupdate` missed) sets `updated_at` in Python to a microsecond timestamp.
   An edit in the same second as the read is therefore still detected, and the
   `updated_at` a read returns round-trips exactly into the precondition.
-  `hotwash_update_playbook` sends the `updated_at` from its ownership read and
-  reports a conflict instead of overwriting a retagged playbook. Callers that
-  omit the field (the web UI) still get `updated_at` bumped.
+  `Playbook.updated_at` no longer carries a column `onupdate` at all, so no
+  write path can fall back to SQLite's whole-second `CURRENT_TIMESTAMP`: create,
+  update, duplicate, import, soft delete, share, and revoke each assign a
+  microsecond value strictly greater than the stored one, and a share or revoke
+  in the same second as an edit can no longer move `updated_at` backward past
+  it. `hotwash_update_playbook` sends the `updated_at` from its ownership read
+  and reports a conflict instead of overwriting a retagged playbook. Callers
+  that omit the field (the web UI) still get `updated_at` bumped.
 - `PlaybookCreate`, `PlaybookUpdate`, and `PlaybookImport` reject unknown fields
   and apply the same bounds as the MCP playbook tools: title 200, description
   8000, category 100, content 100000, and up to 18 tags of 1 to 100 characters
@@ -53,6 +58,13 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   playbook's tags. Both import routes apply the same bounds, and a duplicate's
   ` (Copy)` suffix is truncated so the title stays within 200 characters.
   `hotwash_update_playbook` refuses a merged tag list over 18 before sending it.
+- `POST /api/playbooks/import` accepts `content_markdown: null` when the export
+  carries a usable `graph_json` (at least one node), so a graph-only playbook
+  saved from the canvas round-trips instead of being rejected. Import never
+  truncates a historical value: a title, description, category, tag name, tag
+  count, or Markdown body above the current bound is rejected with a `422` that
+  names the field and the limit. The `PlaybookCreate` and `PlaybookUpdate`
+  bounds are unchanged.
 
 ### Added
 - MCP `hotwash_create_playbook` and `hotwash_update_playbook`: bounded Markdown

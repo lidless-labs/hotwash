@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     PlainSerializer,
     StringConstraints,
+    model_validator,
 )
 
 # Playbook write bounds. These mirror the MCP tool schemas in
@@ -24,6 +25,7 @@ PLAYBOOK_DESCRIPTION_MAX = 8000
 PLAYBOOK_CATEGORY_MAX = 100
 PLAYBOOK_CONTENT_MAX = 100000
 PLAYBOOK_TAG_MAX_ITEMS = 18
+PLAYBOOK_TAG_NAME_MAX = 100
 
 
 def _reject_blank(value: str) -> str:
@@ -41,6 +43,23 @@ def _tag_name(value: Any) -> Any:
             raise ValueError("tag objects must carry a string name")
         return name
     return value
+
+
+def _has_markdown(value: Optional[str]) -> bool:
+    return bool(value and value.strip())
+
+
+def _has_usable_graph(graph: Optional[Dict[str, Any]]) -> bool:
+    """A graph is usable when it carries at least one node to render.
+
+    ``{"nodes": [], "edges": []}`` is the empty graph the bulk import writes for
+    Markdown-only files and renders nothing, so it cannot carry a playbook whose
+    Markdown is null.
+    """
+    if not isinstance(graph, dict):
+        return False
+    nodes = graph.get("nodes")
+    return isinstance(nodes, list) and len(nodes) > 0
 
 
 PlaybookTitle = Annotated[
@@ -61,15 +80,28 @@ PlaybookContent = Annotated[
 ]
 PlaybookTagName = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=100),
+    StringConstraints(min_length=1, max_length=PLAYBOOK_TAG_NAME_MAX),
     AfterValidator(_reject_blank),
 ]
 # Import accepts the tag objects an export writes, then bounds them like a tag.
+# The bounds live in PlaybookImport's validator (not in StringConstraints) so an
+# over-limit historical export is rejected with a 422 that names the field and
+# the limit instead of a bare Pydantic length error.
 ImportTagName = Annotated[
     str,
     BeforeValidator(_tag_name),
-    StringConstraints(min_length=1, max_length=100),
+    StringConstraints(min_length=1),
     AfterValidator(_reject_blank),
+]
+# Import keeps the blank checks but leaves the upper bounds to the validator.
+ImportTitle = Annotated[
+    str,
+    StringConstraints(min_length=1),
+    AfterValidator(_reject_blank),
+]
+ImportCategory = Annotated[
+    str,
+    StringConstraints(min_length=1),
 ]
 # Serialized with six fractional digits so a read round-trips exactly into the
 # expected_updated_at precondition instead of losing sub-second precision.
@@ -194,26 +226,78 @@ class PlaybookImport(BaseModel):
     """Playbook import input schema.
 
     Applies the same bounds as ``PlaybookCreate`` so ``POST /playbooks/import``
-    cannot be used to write a row the bounded agent tools would refuse. The
-    export-only fields are accepted and ignored so a playbook exported by
-    Hotwash can be re-imported; ``share_token`` is deliberately not restored.
+    cannot be used to write a row the bounded agent tools would refuse. An
+    export written before those bounds existed is rejected with a 422 that names
+    the field and the limit; it is never silently truncated. The export-only
+    fields are accepted and ignored so a playbook exported by Hotwash can be
+    re-imported; ``share_token`` is deliberately not restored.
+
+    ``content_markdown`` is optional for the same reason: a graph-only playbook
+    (created from the canvas) exports ``content_markdown: null`` with a
+    ``graph_json``, and that export must round-trip. The validator therefore
+    requires non-blank Markdown *or* a graph with at least one node.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    title: PlaybookTitle
-    description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
+    title: ImportTitle
+    description: Optional[str] = None
     # Optional: an export of a playbook saved without a category carries null.
-    category: Optional[PlaybookCategory] = None
-    content_markdown: PlaybookContent
+    category: Optional[ImportCategory] = None
+    content_markdown: Optional[str] = None
     graph_json: Optional[Dict[str, Any]] = None
-    tags: List[ImportTagName] = Field(default_factory=list, max_length=PLAYBOOK_TAG_MAX_ITEMS)
+    tags: List[ImportTagName] = Field(default_factory=list)
     # Present in an exported playbook; ignored on import.
     id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     share_token: Optional[str] = None
     export_metadata: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _check_importable(self) -> "PlaybookImport":
+        over_limit: List[str] = []
+        for field, value, limit, unit in (
+            ("title", self.title, PLAYBOOK_TITLE_MAX, "characters"),
+            ("description", self.description, PLAYBOOK_DESCRIPTION_MAX, "characters"),
+            ("category", self.category, PLAYBOOK_CATEGORY_MAX, "characters"),
+            ("content_markdown", self.content_markdown, PLAYBOOK_CONTENT_MAX, "characters"),
+        ):
+            if value is not None and len(value) > limit:
+                over_limit.append(
+                    f"{field} is {len(value)} {unit}; the import limit is {limit} {unit}"
+                )
+        if len(self.tags) > PLAYBOOK_TAG_MAX_ITEMS:
+            over_limit.append(
+                f"tags has {len(self.tags)} items; the import limit is "
+                f"{PLAYBOOK_TAG_MAX_ITEMS} items"
+            )
+        for index, tag in enumerate(self.tags):
+            if len(tag) > PLAYBOOK_TAG_NAME_MAX:
+                over_limit.append(
+                    f"tags[{index}] is {len(tag)} characters; the import limit is "
+                    f"{PLAYBOOK_TAG_NAME_MAX} characters"
+                )
+
+        if over_limit:
+            raise ValueError(
+                "over the playbook import bounds: "
+                + "; ".join(over_limit)
+                + ". Reduce the value first; import does not truncate."
+            )
+
+        if not _has_markdown(self.content_markdown):
+            if not _has_usable_graph(self.graph_json):
+                raise ValueError(
+                    "content_markdown is null or blank and graph_json has no nodes; "
+                    "an imported playbook needs non-blank Markdown or a graph with "
+                    "at least one node"
+                )
+            # A whitespace-only value carries nothing; store the null a
+            # graph-only playbook exports.
+            self.content_markdown = None
+
+        return self
 
 
 class BulkImportResult(BaseModel):

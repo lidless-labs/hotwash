@@ -45,8 +45,13 @@ class Playbook(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
+    # No ``onupdate``: SQLite's ``CURRENT_TIMESTAMP`` is whole-second, so
+    # rewriting ``updated_at`` on every column change would let a share/revoke
+    # in the same second move it *backward* past a microsecond-precision edit
+    # and defeat the PUT precondition. Every write path assigns a monotonic
+    # microsecond value in Python (see ``api.services.timestamps``).
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime, server_default=func.now(), nullable=False
     )
 
     # Relationships
