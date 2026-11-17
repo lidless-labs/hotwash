@@ -3,9 +3,20 @@ Pydantic schemas for Hotwash CRUD API.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+# Playbook write bounds. These mirror the MCP tool schemas in
+# mcp/src/tools/playbooks.ts so an API key holder cannot exceed what the
+# bounded agent tools allow. Tag.name is String(100), so a longer tag would
+# otherwise fail at the database layer instead of the request.
+PLAYBOOK_TITLE_MAX = 200
+PLAYBOOK_DESCRIPTION_MAX = 8000
+PLAYBOOK_CATEGORY_MAX = 100
+PLAYBOOK_CONTENT_MAX = 100000
+PLAYBOOK_TAG_MAX_ITEMS = 18
+PlaybookTagName = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
 
 class TagOut(BaseModel):
@@ -20,21 +31,32 @@ class TagOut(BaseModel):
 class PlaybookCreate(BaseModel):
     """Playbook create input schema."""
 
-    title: str = Field(..., min_length=1)
-    description: Optional[str] = None
-    category: Optional[str] = None
-    content_markdown: str = Field(..., min_length=1)
-    tags: Optional[List[str]] = None
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1, max_length=PLAYBOOK_TITLE_MAX)
+    description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
+    category: Optional[str] = Field(default=None, max_length=PLAYBOOK_CATEGORY_MAX)
+    content_markdown: str = Field(..., min_length=1, max_length=PLAYBOOK_CONTENT_MAX)
+    tags: Optional[List[PlaybookTagName]] = Field(default=None, max_length=PLAYBOOK_TAG_MAX_ITEMS)
 
 
 class PlaybookUpdate(BaseModel):
-    """Playbook update input schema."""
+    """Playbook update input schema.
 
-    title: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
-    content_markdown: Optional[str] = None
-    tags: Optional[List[str]] = None
+    ``expected_updated_at`` is an optional optimistic-concurrency precondition:
+    send the ``updated_at`` value from the read that produced this payload and
+    the write is rejected with 409 if the playbook changed in between. Callers
+    that omit it (the web UI) keep last-write-wins behavior.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: Optional[str] = Field(default=None, max_length=PLAYBOOK_TITLE_MAX)
+    description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
+    category: Optional[str] = Field(default=None, max_length=PLAYBOOK_CATEGORY_MAX)
+    content_markdown: Optional[str] = Field(default=None, max_length=PLAYBOOK_CONTENT_MAX)
+    tags: Optional[List[PlaybookTagName]] = Field(default=None, max_length=PLAYBOOK_TAG_MAX_ITEMS)
+    expected_updated_at: Optional[datetime] = None
 
 
 class PlaybookSummary(BaseModel):

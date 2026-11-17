@@ -201,6 +201,15 @@ def get_playbook(playbook_id: int, db: Session = Depends(get_db)):
 def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
 
+    # Optimistic concurrency for read-then-write callers (hotwash-mcp sends the
+    # updated_at it read during its ownership check). Omitted by the web UI,
+    # which keeps last-write-wins.
+    if payload.expected_updated_at is not None and payload.expected_updated_at != playbook.updated_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Playbook changed since it was read; re-read before retrying",
+        )
+
     content_changed = payload.content_markdown is not None and payload.content_markdown != playbook.content_markdown
 
     if content_changed:
