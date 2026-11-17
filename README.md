@@ -90,7 +90,7 @@ Add it to your MCP client config:
 }
 ```
 
-Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools; the server is read-only otherwise), and `HOTWASH_MCP_ANALYZER_ALLOWLIST` (analyzer IDs `hotwash_run_analyzer` may launch, default `CIRCLHashlookup_1_1,MISP_2_1`).
+Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools on the loopback HTTP transport; stdio and non-loopback binds stay read-only), and `HOTWASH_MCP_ANALYZER_ALLOWLIST` (analyzer IDs `hotwash_run_analyzer` may launch, default `CIRCLHashlookup_1_1,MISP_2_1`).
 
 ### Tools
 

@@ -10,8 +10,9 @@ afterEach(async () => {
   globalThis.fetch = realFetch;
   await Promise.all(connections.splice(0).map(client => client.close()));
 });
-async function connect(allowMutations = true) {
-  const server = createMcpServer({ url: "https://example.invalid", timeout: 1000, allowMutations });
+async function connect(allowMutations = true, writesEnabled = true) {
+  // writesEnabled models the loopback-HTTP capability http.ts grants.
+  const server = createMcpServer({ url: "https://example.invalid", timeout: 1000, allowMutations, writesEnabled });
   const client = new Client({ name: "playbook-write-test", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(b), client.connect(a)]);
@@ -32,7 +33,7 @@ function record(handler: (entry: Seen) => Response) {
 }
 const create = { title: "Triage", description: "Review alert", category: "SOC", tags: ["triage"], content_markdown: "# Triage\n\n## Review\n\tCheck evidence\r\n", confirm: true };
 const update = { playbook_id: 7, title: "Revised", confirm: true };
-const owned = { id: 7, tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }] };
+const owned = { id: 7, updated_at: "2026-01-01T00:00:00", tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }] };
 const calls: [string, Record<string, unknown>][] = [["hotwash_create_playbook", create], ["hotwash_update_playbook", update]];
 for (const [name, args] of calls) {
   test(`${name} refuses disabled mutations before any read or write`, async () => {
@@ -76,7 +77,7 @@ test("create posts the REST shape with deduplicated mandatory draft and ownershi
   assert.doesNotMatch(JSON.stringify(result), /do-not-echo/);
 });
 test("update merges tags and never drops existing draft or human tags", async () => {
-  const human = { id: 7, tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }, { id: 3, name: "reviewed-by-solomon" }] };
+  const human = { id: 7, updated_at: "2026-01-01T00:00:00", tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }, { id: 3, name: "reviewed-by-solomon" }] };
   const seen = record(() => json(human));
   const client = await connect();
   const result = await client.callTool({ name: "hotwash_update_playbook", arguments: { playbook_id: 7, tags: ["triage"], confirm: true } });
@@ -104,7 +105,7 @@ test("update fetches first, preserves omitted fields, and forces soc-bot on tag 
     const seen = record(() => json(owned));
     assert.notEqual((await client.callTool({ name: calls[1][0], arguments: { ...update, ...extra } })).isError, true);
     assert.deepEqual(seen.map(s => [s.method, s.path]), [["GET", "/api/playbooks/7"], ["PUT", "/api/playbooks/7"]]);
-    assert.deepEqual(seen[1].body, { title: "Revised", ...(extra.tags !== undefined ? { tags: extra.tags.length ? ["soc-bot", "draft", "reviewed"] : ["soc-bot", "draft"] } : {}) });
+    assert.deepEqual(seen[1].body, { title: "Revised", expected_updated_at: "2026-01-01T00:00:00", ...(extra.tags !== undefined ? { tags: extra.tags.length ? ["soc-bot", "draft", "reviewed"] : ["soc-bot", "draft"] } : {}) });
     assert.equal(seen[1].redirect, "manual");
   }
 });
@@ -140,4 +141,39 @@ test("valid boundary sizes are accepted and metadata controls are refused", asyn
     assert.equal((await client.callTool({ name: calls[0][0], arguments: { ...create, [field]: "bad\nline" } })).isError, true);
   }
   assert.equal(seen.length, 1);
+});
+
+// --- optimistic concurrency and the loopback write capability --------------
+
+test("update refuses when the ownership read carries no version to precondition on", async () => {
+  const client = await connect();
+  const seen = record(() => json({ id: 7, tags: [{ id: 1, name: "soc-bot" }] }));
+  const result = await client.callTool({ name: calls[1][0], arguments: update });
+  assert.equal(result.isError, true);
+  assert.match(JSON.stringify(result.content), /version could not be verified/);
+  assert.deepEqual(seen.map(s => s.method), ["GET"]);
+});
+test("a 409 from the playbook PUT is reported as a conflict, not an unconfirmed write", async () => {
+  const client = await connect();
+  const seen = record(entry => entry.method === "PUT"
+    ? json({ detail: "private-response" }, 409)
+    : json(owned));
+  const result = await client.callTool({ name: calls[1][0], arguments: update });
+  assert.equal(result.isError, true);
+  const text = JSON.stringify(result.content);
+  assert.match(text, /changed since it was read/);
+  assert.match(text, /re-read/);
+  assert.doesNotMatch(text, /private-response/);
+  assert.doesNotMatch(text, /outcome not confirmed/);
+  assert.deepEqual(seen.map(s => [s.method, s.path]), [["GET", "/api/playbooks/7"], ["PUT", "/api/playbooks/7"]]);
+});
+test("writes need the loopback capability, not only the operator opt-in", async () => {
+  const seen = record(() => json(owned));
+  const client = await connect(true, false);
+  for (const [name, args] of calls) {
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, true, name);
+    assert.match(JSON.stringify(result.content), /loopback/);
+  }
+  assert.equal(seen.length, 0, "no backend request may be made");
 });

@@ -16,7 +16,8 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
 
 async function connect(config: Partial<HotwashConfig> = {}) {
-  const server = createMcpServer({ url: "http://example.invalid", timeout: 5000, ...config });
+  // writesEnabled models the loopback-HTTP capability http.ts grants.
+  const server = createMcpServer({ url: "http://example.invalid", timeout: 5000, writesEnabled: true, ...config });
   const client = new Client({ name: "hardening-test", version: "1" });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);

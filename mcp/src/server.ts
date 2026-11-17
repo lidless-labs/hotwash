@@ -22,7 +22,9 @@ export function createMcpServer(config: HotwashConfig = getConfig()): McpServer 
   });
 
   const client = new HotwashClient(config);
-  const policy = { allowMutations: config.allowMutations === true };
+  // Two independent conditions: the operator opt-in, and the loopback-HTTP
+  // write capability that only http.ts grants. stdio never has the latter.
+  const policy = { allowMutations: config.allowMutations === true && config.writesEnabled === true };
 
   registerPlaybookTools(server, client);
   registerPlaybookWriteTools(server, client, policy);

@@ -10,6 +10,14 @@ const MAX_SESSIONS = 128;
 const SESSION_IDLE_MS = 30 * 60_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+// Loopback addresses that may carry state-changing tools. A hostname is only
+// trusted once the kernel reports the bound address, which is always a literal.
+const WRITABLE_BIND_HOSTS = new Set(["127.0.0.1", "::1"]);
+
+function isWritableBind(value: string): boolean {
+  return WRITABLE_BIND_HOSTS.has(value.trim().toLowerCase().replace(/^\[|\]$/g, ""));
+}
+
 function equalSecret(a: string, b: string): boolean {
   return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
 }
@@ -71,6 +79,8 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 export interface HttpServerHandle {
   host: string;
   port: number;
+  // True only when the operator opt-in and the loopback bind both hold.
+  writesEnabled: boolean;
   close(): Promise<void>;
 }
 
@@ -94,6 +104,11 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   // bind would answer 403 to every non-loopback client.
   if (["0.0.0.0", "::", "[::]"].includes(host.trim())) {
     throw new Error("HOTWASH_MCP_HTTP_HOST must be a specific address, not a wildcard; bind the interface clients will use");
+  }
+  // Writes are tied to the dedicated loopback listener. Refuse to start rather
+  // than run a write-enabled server where other hosts can reach it.
+  if (cfg.allowMutations === true && !isWritableBind(host)) {
+    throw new Error("HOTWASH_MCP_ALLOW_MUTATIONS requires a loopback bind (HOTWASH_MCP_HTTP_HOST=127.0.0.1 or ::1); refusing to start a write-enabled server on a non-loopback address");
   }
   const portValue = env.HOTWASH_MCP_HTTP_PORT ?? "3118";
   if (!/^\d+$/.test(portValue) || Number(portValue) > 65535) {
@@ -145,7 +160,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
     if (!session) {
       if (request.method !== "POST" || !isInitializeRequest(body)) return send(response, 400, "Initialize a session first");
       if (resources.size >= MAX_SESSIONS) return send(response, 503, "Service unavailable");
-      const server = createMcpServer(cfg);
+      const server = createMcpServer(sessionConfig);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         enableJsonResponse: true,
@@ -195,6 +210,14 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   });
   const address = listener.address();
   if (!address || typeof address === "string") throw new Error("HTTP listener did not bind a TCP port");
+  // Authoritative check: the kernel reports the address actually bound, so a
+  // hostname that resolved elsewhere can never smuggle in write tools.
+  if (cfg.allowMutations === true && !isWritableBind(address.address)) {
+    await new Promise<void>((resolve) => listener.close(() => resolve()));
+    throw new Error("HOTWASH_MCP_ALLOW_MUTATIONS requires a loopback bind (127.0.0.1 or ::1); refusing to start a write-enabled server on a non-loopback address");
+  }
+  const writesEnabled = cfg.allowMutations === true;
+  const sessionConfig = { ...cfg, writesEnabled };
   const reaper = setInterval(() => {
     for (const session of resources) {
       if (session.active === 0 && Date.now() - session.lastUsed > SESSION_IDLE_MS) {
@@ -207,6 +230,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   return {
     host: address.address,
     port: address.port,
+    writesEnabled,
     close() {
       closePromise ??= (async () => {
         closing = true;
@@ -232,7 +256,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
 export async function startHttpServer(): Promise<void> {
   const http = await createHttpServer();
   const host = http.host.includes(":") ? `[${http.host}]` : http.host;
-  console.error(`hotwash-mcp HTTP listening on http://${host}:${http.port}/mcp`);
+  console.error(`hotwash-mcp HTTP listening on http://${host}:${http.port}/mcp${http.writesEnabled ? " (state-changing tools enabled)" : " (read-only)"}`);
   const shutdown = () => {
     void http.close().then(() => {
       process.off("SIGTERM", shutdown);

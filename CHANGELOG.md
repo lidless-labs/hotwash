@@ -28,6 +28,19 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   reads responses through a byte limit (`HOTWASH_MCP_MAX_RESPONSE_BYTES`).
   `hotwash_list_playbooks` now returns `{count, playbooks}` instead of a bare
   array, and `hotwash_list_suggestions` caps `limit` at 200.
+- `hotwash-mcp`: state-changing tools need `HOTWASH_MCP_ALLOW_MUTATIONS=true`
+  **and** the loopback HTTP listener (`127.0.0.1` or `::1`) with its dedicated
+  `HOTWASH_MCP_HTTP_TOKEN`. The stdio transport stays read-only, and the HTTP
+  server refuses to start write-enabled on a non-loopback address.
+- `PUT /api/playbooks/{id}` takes an optional `expected_updated_at`
+  precondition and returns `409` when the playbook changed since it was read.
+  `hotwash_update_playbook` sends the `updated_at` from its ownership read and
+  reports a conflict instead of overwriting a retagged playbook. Callers that
+  omit the field (the web UI) keep last-write-wins behavior.
+- `PlaybookCreate` and `PlaybookUpdate` reject unknown fields and apply the same
+  bounds as the MCP playbook tools: title 200, description 8000, category 100,
+  content 100000, and up to 18 tags of 1 to 100 characters (the `Tag.name`
+  column length).
 
 ### Added
 - MCP `hotwash_create_playbook` and `hotwash_update_playbook`: bounded Markdown

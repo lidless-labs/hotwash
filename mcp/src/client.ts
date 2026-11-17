@@ -31,6 +31,14 @@ export class ResponseTooLargeError extends Error {
   }
 }
 
+// A 409 from a playbook PUT means someone else wrote the playbook between the
+// read and the write. The caller re-reads; nothing here echoes backend text.
+export class PlaybookConflictError extends Error {
+  constructor() {
+    super("Hotwash playbook changed since it was read; re-read the playbook before retrying");
+  }
+}
+
 // Read a response body through a strict byte ceiling so an oversized or
 // unending body is cut off before it is buffered whole or parsed.
 async function readBodyLimited(response: Response, limit: number): Promise<string> {
@@ -154,8 +162,12 @@ export class HotwashClient {
     return this.playbookWrite("/api/playbooks", "POST", body);
   }
 
-  updatePlaybook(id: number, body: { title?: string; description?: string; category?: string; tags?: string[]; content_markdown?: string }): Promise<unknown> {
-    return this.playbookWrite(`/api/playbooks/${id}`, "PUT", body);
+  updatePlaybook(
+    id: number,
+    body: { title?: string; description?: string; category?: string; tags?: string[]; content_markdown?: string },
+    expectedUpdatedAt: string,
+  ): Promise<unknown> {
+    return this.playbookWrite(`/api/playbooks/${id}`, "PUT", { ...body, expected_updated_at: expectedUpdatedAt });
   }
 
   // Never replay a write through redirects or expose backend error text.
@@ -169,10 +181,12 @@ export class HotwashClient {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
+        if (response.status === 409) throw new PlaybookConflictError();
         throw new Error(`Hotwash playbook write failed (HTTP ${response.status}); outcome not confirmed, inspect playbooks before retrying`);
       }
       return JSON.parse(await readBodyLimited(response, this.maxResponseBytes));
     } catch (error) {
+      if (error instanceof PlaybookConflictError) throw error;
       if (error instanceof Error && error.message.startsWith("Hotwash playbook write failed")) throw error;
       throw new Error("Hotwash playbook write outcome not confirmed; inspect playbooks before retrying");
     } finally { clearTimeout(timer); }

@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 const WORKERS = { CIRCLHashlookup_1_1: "1111aaaa2222bbbb3333cccc4444dddd", MISP_2_1: "5555eeee6666ffff7777aaaa8888bbbb" };
 async function connect(config: Partial<HotwashConfig> = {}) {
-  const server = createMcpServer({ url: "http://example.invalid", timeout: 1000, allowMutations: true, analyzerAllowlist: WORKERS, ...config });
+  const server = createMcpServer({ url: "http://example.invalid", timeout: 1000, allowMutations: true, writesEnabled: true, analyzerAllowlist: WORKERS, ...config });
   const client = new Client({ name: "soc-writes-test", version: "1" });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(b), client.connect(a)]);

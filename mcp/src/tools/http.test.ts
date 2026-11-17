@@ -135,6 +135,23 @@ for (const host of ["0.0.0.0", "::", "[::]"]) {
     await assert.rejects(start(), /not a wildcard/);
   });
 }
+test("refuses a write-enabled server on a non-loopback bind", async () => {
+  configure();
+  process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
+  // RFC 5737 documentation address: never loopback, never bindable here.
+  process.env.HOTWASH_MCP_HTTP_HOST = "192.0.2.10";
+  await assert.rejects(createHttpServer(), /loopback/);
+});
+test("grants the write capability only to a loopback bind with the opt-in", async () => {
+  configure();
+  http = await createHttpServer();
+  assert.equal(http.writesEnabled, false);
+  await http.close();
+  process.env.HOTWASH_MCP_ALLOW_MUTATIONS = "true";
+  http = await createHttpServer();
+  assert.equal(http.writesEnabled, true);
+  assert.equal(http.host, "127.0.0.1");
+});
 test("accepts a token with surrounding whitespace from a secrets file", async () => {
   configure();
   process.env.HOTWASH_MCP_HTTP_TOKEN = `  ${token}\n`;
