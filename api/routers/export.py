@@ -13,8 +13,16 @@ from api.auth import get_api_key
 from api.database import get_db
 from api.orm_models import Playbook
 from api.routers.playbooks import _build_detail, _deserialize_graph, _serialize_graph
-from api.schemas import BulkImportResult, PlaybookDetail, PlaybookExport, PlaybookImport
+from api.schemas import (
+    PLAYBOOK_CONTENT_MAX,
+    PLAYBOOK_TITLE_MAX,
+    BulkImportResult,
+    PlaybookDetail,
+    PlaybookExport,
+    PlaybookImport,
+)
 from api.services.tags import get_or_create_tag
+from api.services.timestamps import utcnow
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
 
@@ -180,16 +188,19 @@ def _to_mermaid(graph: Dict[str, Any]) -> str:
 
 
 def _create_imported_playbook(db: Session, payload: PlaybookImport) -> Playbook:
+    now = utcnow()
     playbook = Playbook(
         title=payload.title.strip(),
         description=payload.description,
-        category=payload.category.strip(),
+        category=payload.category.strip() if payload.category else None,
         content_markdown=payload.content_markdown,
         graph_json=_serialize_graph(payload.graph_json),
+        created_at=now,
+        updated_at=now,
     )
 
     if payload.tags:
-        playbook.tags = [get_or_create_tag(db, tag) for tag in payload.tags if tag.strip()]
+        playbook.tags = [get_or_create_tag(db, tag) for tag in payload.tags]
 
     db.add(playbook)
     db.flush()
@@ -279,11 +290,16 @@ async def bulk_import_markdown(files: List[UploadFile] = File(...), db: Session 
             raw = await file.read()
             _validate_bulk_import_file(file, raw)
             text = raw.decode("utf-8")
+            if len(text) > PLAYBOOK_CONTENT_MAX:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{file.filename} exceeds the {PLAYBOOK_CONTENT_MAX} character playbook limit",
+                )
 
             title = "Imported Playbook"
             for line in text.splitlines():
                 if line.strip().startswith("# "):
-                    title = line.strip()[2:].strip() or title
+                    title = line.strip()[2:].strip()[:PLAYBOOK_TITLE_MAX] or title
                     break
 
             payloads.append((

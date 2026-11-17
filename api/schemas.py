@@ -5,7 +5,15 @@ Pydantic schemas for Hotwash CRUD API.
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+)
 
 # Playbook write bounds. These mirror the MCP tool schemas in
 # mcp/src/tools/playbooks.ts so an API key holder cannot exceed what the
@@ -16,7 +24,63 @@ PLAYBOOK_DESCRIPTION_MAX = 8000
 PLAYBOOK_CATEGORY_MAX = 100
 PLAYBOOK_CONTENT_MAX = 100000
 PLAYBOOK_TAG_MAX_ITEMS = 18
-PlaybookTagName = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+
+
+def _reject_blank(value: str) -> str:
+    """A single space passes min_length=1 but would be stripped to nothing."""
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
+
+
+def _tag_name(value: Any) -> Any:
+    """Accept the ``{id, name}`` tag shape from an exported playbook."""
+    if isinstance(value, dict):
+        name = value.get("name")
+        if not isinstance(name, str):
+            raise ValueError("tag objects must carry a string name")
+        return name
+    return value
+
+
+PlaybookTitle = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=PLAYBOOK_TITLE_MAX),
+    AfterValidator(_reject_blank),
+]
+# Import requires a category; create and update accept any string (including "")
+# because the web UI sends its selected category verbatim.
+PlaybookCategory = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=PLAYBOOK_CATEGORY_MAX),
+]
+PlaybookContent = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=PLAYBOOK_CONTENT_MAX),
+    AfterValidator(_reject_blank),
+]
+PlaybookTagName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=100),
+    AfterValidator(_reject_blank),
+]
+# Import accepts the tag objects an export writes, then bounds them like a tag.
+ImportTagName = Annotated[
+    str,
+    BeforeValidator(_tag_name),
+    StringConstraints(min_length=1, max_length=100),
+    AfterValidator(_reject_blank),
+]
+# Serialized with six fractional digits so a read round-trips exactly into the
+# expected_updated_at precondition instead of losing sub-second precision.
+MicrosecondTimestamp = Annotated[
+    datetime,
+    PlainSerializer(
+        lambda value: value.isoformat(timespec="microseconds"),
+        return_type=str,
+        when_used="json",
+    ),
+]
 
 
 class TagOut(BaseModel):
@@ -33,10 +97,10 @@ class PlaybookCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(..., min_length=1, max_length=PLAYBOOK_TITLE_MAX)
+    title: PlaybookTitle
     description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
     category: Optional[str] = Field(default=None, max_length=PLAYBOOK_CATEGORY_MAX)
-    content_markdown: str = Field(..., min_length=1, max_length=PLAYBOOK_CONTENT_MAX)
+    content_markdown: PlaybookContent
     tags: Optional[List[PlaybookTagName]] = Field(default=None, max_length=PLAYBOOK_TAG_MAX_ITEMS)
 
 
@@ -46,15 +110,16 @@ class PlaybookUpdate(BaseModel):
     ``expected_updated_at`` is an optional optimistic-concurrency precondition:
     send the ``updated_at`` value from the read that produced this payload and
     the write is rejected with 409 if the playbook changed in between. Callers
-    that omit it (the web UI) keep last-write-wins behavior.
+    that omit it (the web UI) still get ``updated_at`` bumped; the check runs
+    against the value read in the same request.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    title: Optional[str] = Field(default=None, max_length=PLAYBOOK_TITLE_MAX)
+    title: Optional[PlaybookTitle] = None
     description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
     category: Optional[str] = Field(default=None, max_length=PLAYBOOK_CATEGORY_MAX)
-    content_markdown: Optional[str] = Field(default=None, max_length=PLAYBOOK_CONTENT_MAX)
+    content_markdown: Optional[PlaybookContent] = None
     tags: Optional[List[PlaybookTagName]] = Field(default=None, max_length=PLAYBOOK_TAG_MAX_ITEMS)
     expected_updated_at: Optional[datetime] = None
 
@@ -71,7 +136,7 @@ class PlaybookSummary(BaseModel):
     tags: List[TagOut]
     node_count: int
     created_at: datetime
-    updated_at: datetime
+    updated_at: MicrosecondTimestamp
 
 
 class PlaybookDetail(BaseModel):
@@ -88,7 +153,7 @@ class PlaybookDetail(BaseModel):
     tags: List[TagOut]
     node_count: int
     created_at: datetime
-    updated_at: datetime
+    updated_at: MicrosecondTimestamp
     versions_count: int
     share_token: Optional[str] = None
 
@@ -120,18 +185,35 @@ class PlaybookExport(BaseModel):
     graph_json: Optional[Dict[str, Any]] = None
     tags: List[TagOut] = Field(default_factory=list)
     created_at: datetime
-    updated_at: datetime
+    updated_at: MicrosecondTimestamp
     share_token: Optional[str] = None
     export_metadata: ExportMetadata
 
 
 class PlaybookImport(BaseModel):
-    title: str = Field(..., min_length=1)
-    description: Optional[str] = None
-    category: str = Field(..., min_length=1)
-    content_markdown: Optional[str] = None
+    """Playbook import input schema.
+
+    Applies the same bounds as ``PlaybookCreate`` so ``POST /playbooks/import``
+    cannot be used to write a row the bounded agent tools would refuse. The
+    export-only fields are accepted and ignored so a playbook exported by
+    Hotwash can be re-imported; ``share_token`` is deliberately not restored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: PlaybookTitle
+    description: Optional[str] = Field(default=None, max_length=PLAYBOOK_DESCRIPTION_MAX)
+    # Optional: an export of a playbook saved without a category carries null.
+    category: Optional[PlaybookCategory] = None
+    content_markdown: PlaybookContent
     graph_json: Optional[Dict[str, Any]] = None
-    tags: List[str] = Field(default_factory=list)
+    tags: List[ImportTagName] = Field(default_factory=list, max_length=PLAYBOOK_TAG_MAX_ITEMS)
+    # Present in an exported playbook; ignored on import.
+    id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    share_token: Optional[str] = None
+    export_metadata: Optional[Dict[str, Any]] = None
 
 
 class BulkImportResult(BaseModel):
