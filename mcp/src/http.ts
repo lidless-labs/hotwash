@@ -3,12 +3,20 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpServer, stripToolSchemaDialect } from "./server.js";
-import { getConfig } from "./config.js";
+import { getConfig, type HotwashConfig } from "./config.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_SESSIONS = 128;
 const SESSION_IDLE_MS = 30 * 60_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// Loopback addresses that may carry state-changing tools. A hostname is only
+// trusted once the kernel reports the bound address, which is always a literal.
+const WRITABLE_BIND_HOSTS = new Set(["127.0.0.1", "::1"]);
+
+function isWritableBind(value: string): boolean {
+  return WRITABLE_BIND_HOSTS.has(value.trim().toLowerCase().replace(/^\[|\]$/g, ""));
+}
 
 function equalSecret(a: string, b: string): boolean {
   return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
@@ -71,6 +79,8 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 export interface HttpServerHandle {
   host: string;
   port: number;
+  // True only when the operator opt-in and the loopback bind both hold.
+  writesEnabled: boolean;
   close(): Promise<void>;
 }
 
@@ -110,6 +120,14 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   // Includes initializations in flight, so both capacity and shutdown cover them.
   const resources = new Set<Session>();
   let closing = false;
+  // Writes are decided only after the listener binds, because the kernel's
+  // address is authoritative (a hostname such as localhost can resolve
+  // elsewhere). Handlers await this gate, so they can never read the write
+  // configuration before it exists.
+  let releaseReady!: () => void;
+  const ready = new Promise<void>((resolve) => { releaseReady = resolve; });
+  let writesEnabled = false;
+  let sessionConfig: HotwashConfig = { ...cfg, writesEnabled: false };
   const dispose = async (session: Session): Promise<void> => {
     resources.delete(session);
     if (session.transport.sessionId) sessions.delete(session.transport.sessionId);
@@ -117,6 +135,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   };
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    await ready;
     if (closing) return send(response, 503, "Service unavailable");
     if (!validHost(request.headers.host, host) || !validOrigin(request.headers.origin)) {
       return send(response, 403, "Forbidden");
@@ -145,7 +164,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
     if (!session) {
       if (request.method !== "POST" || !isInitializeRequest(body)) return send(response, 400, "Initialize a session first");
       if (resources.size >= MAX_SESSIONS) return send(response, 503, "Service unavailable");
-      const server = createMcpServer(cfg);
+      const server = createMcpServer(sessionConfig);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         enableJsonResponse: true,
@@ -194,7 +213,28 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
     listener.listen(port, host, () => { listener.off("error", reject); resolve(); });
   });
   const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("HTTP listener did not bind a TCP port");
+  if (!address || typeof address === "string") {
+    closing = true;
+    releaseReady();
+    const stopped = new Promise<void>((resolve) => listener.close(() => resolve()));
+    listener.closeAllConnections();
+    await stopped;
+    throw new Error("HTTP listener did not bind a TCP port");
+  }
+  // Authoritative check: the kernel reports the address actually bound, so a
+  // hostname such as localhost that resolved elsewhere can never smuggle in
+  // write tools. A literal 127.0.0.1 or ::1 bind passes; anything else refuses.
+  if (cfg.allowMutations === true && !isWritableBind(address.address)) {
+    closing = true;
+    releaseReady();
+    const stopped = new Promise<void>((resolve) => listener.close(() => resolve()));
+    listener.closeAllConnections();
+    await stopped;
+    throw new Error("HOTWASH_MCP_ALLOW_MUTATIONS requires a loopback bind (127.0.0.1 or ::1); refusing to start a write-enabled server on a non-loopback address");
+  }
+  writesEnabled = cfg.allowMutations === true;
+  sessionConfig = { ...cfg, writesEnabled };
+  releaseReady();
   const reaper = setInterval(() => {
     for (const session of resources) {
       if (session.active === 0 && Date.now() - session.lastUsed > SESSION_IDLE_MS) {
@@ -207,6 +247,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
   return {
     host: address.address,
     port: address.port,
+    writesEnabled,
     close() {
       closePromise ??= (async () => {
         closing = true;
@@ -232,7 +273,7 @@ export async function createHttpServer(): Promise<HttpServerHandle> {
 export async function startHttpServer(): Promise<void> {
   const http = await createHttpServer();
   const host = http.host.includes(":") ? `[${http.host}]` : http.host;
-  console.error(`hotwash-mcp HTTP listening on http://${host}:${http.port}/mcp`);
+  console.error(`hotwash-mcp HTTP listening on http://${host}:${http.port}/mcp${http.writesEnabled ? " (state-changing tools enabled)" : " (read-only)"}`);
   const shutdown = () => {
     void http.close().then(() => {
       process.off("SIGTERM", shutdown);

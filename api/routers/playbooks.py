@@ -7,10 +7,11 @@ CRUD endpoints for playbook persistence and versioning.
 import json
 import re
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, func, or_
+from sqlalchemy import String, cast, desc, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from api.auth import get_api_key
@@ -18,6 +19,7 @@ from api.database import get_db
 from api.orm_models import Playbook, PlaybookVersion, Tag
 from api.parsers.markdown_parser import MarkdownParser
 from api.schemas import (
+    PLAYBOOK_TITLE_MAX,
     PlaybookCreate,
     PlaybookDetail,
     PlaybookSummary,
@@ -28,6 +30,7 @@ from api.schemas import (
     TagOut,
 )
 from api.services.tags import get_or_create_tag, normalize_tag
+from api.services.timestamps import as_naive_utc, next_updated_at, utcnow
 
 router = APIRouter(dependencies=[Depends(get_api_key)])
 shared_router = APIRouter()
@@ -120,19 +123,77 @@ def _ensure_playbook(db: Session, playbook_id: int) -> Playbook:
     return playbook
 
 
+def _matches_updated_at(expected: datetime):
+    """Condition matching the stored version, as text.
+
+    SQLAlchemy binds a datetime with six fractional digits, while SQLite's
+    ``CURRENT_TIMESTAMP`` writes whole seconds. A row created before writes set
+    the timestamp in Python therefore needs the second-resolution text
+    comparison as well, or its precondition could never match.
+    """
+    matches = [Playbook.updated_at == expected]
+    if expected.microsecond == 0:
+        matches.append(
+            cast(Playbook.updated_at, String) == expected.strftime("%Y-%m-%d %H:%M:%S")
+        )
+    return or_(*matches)
+
+
+# Bounded retries for a compare-and-set write that lost a race. Each retry
+# starts a fresh transaction, so it reads the version the other writer committed.
+_ADVANCE_ATTEMPTS = 8
+
+
+def _advance_playbook(db: Session, playbook_id: int, **values: Any) -> datetime:
+    """Apply ``values`` and move ``updated_at`` strictly forward in one write.
+
+    Share, revoke and soft delete used to read the stored timestamp, compute the
+    next one in Python and commit later. A concurrent PUT committing in between
+    could then be overwritten by an older timestamp, which reopened the #46
+    precondition race. This writes only if ``updated_at`` still equals the value
+    just read (the same conditional UPDATE the edit path uses), and re-reads and
+    retries when another writer got there first.
+    """
+    for _ in range(_ADVANCE_ATTEMPTS):
+        current = db.execute(
+            select(Playbook.updated_at).where(Playbook.id == playbook_id, Playbook.is_deleted.is_(False))
+        ).scalar_one_or_none()
+        if current is None:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="Playbook not found")
+        bumped = next_updated_at(current)
+        result = db.execute(
+            update(Playbook)
+            .where(Playbook.id == playbook_id, _matches_updated_at(as_naive_utc(current)))
+            .values(updated_at=bumped, **values)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            db.commit()
+            return bumped
+        db.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Playbook is being changed by another request; retry",
+    )
+
+
 @router.post("/playbooks", response_model=PlaybookDetail, status_code=status.HTTP_201_CREATED)
 def create_playbook(payload: PlaybookCreate, db: Session = Depends(get_db)):
     graph_json = _parse_graph_json(payload.content_markdown)
+    now = utcnow()
     playbook = Playbook(
         title=payload.title.strip(),
         description=payload.description,
         category=payload.category,
         content_markdown=payload.content_markdown,
         graph_json=_serialize_graph(graph_json),
+        created_at=now,
+        updated_at=now,
     )
 
     if payload.tags:
-        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags if name.strip()]
+        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags]
 
     db.add(playbook)
     db.commit()
@@ -201,7 +262,40 @@ def get_playbook(playbook_id: int, db: Session = Depends(get_db)):
 def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
 
+    # Parse new content before taking the write, so an unparseable payload never
+    # leaves a bumped timestamp behind.
     content_changed = payload.content_markdown is not None and payload.content_markdown != playbook.content_markdown
+    new_graph_json = _serialize_graph(_parse_graph_json(payload.content_markdown)) if content_changed else None
+
+    # Optimistic concurrency for read-then-write callers (hotwash-mcp sends the
+    # updated_at it read during its ownership check). Omitted by the web UI; the
+    # check then runs against the version read in this request.
+    expected = (
+        as_naive_utc(payload.expected_updated_at)
+        if payload.expected_updated_at is not None
+        else as_naive_utc(playbook.updated_at)
+    )
+    bumped = next_updated_at(playbook.updated_at)
+
+    # The precondition check and the bump are one conditional UPDATE, so two
+    # writers that read the same version cannot both pass. Doing it here also
+    # makes a tags-only write advance updated_at: SQLAlchemy's onupdate fires
+    # only when a playbooks column changes, which is the #46 race.
+    updated = db.execute(
+        update(Playbook)
+        .where(Playbook.id == playbook_id, _matches_updated_at(expected))
+        .values(updated_at=bumped)
+        .execution_options(synchronize_session=False)
+    )
+    if updated.rowcount != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Playbook changed since it was read; re-read before retrying",
+        )
+
+    # Pin the ORM object to the value the conditional UPDATE just wrote so the
+    # later flush of the other columns does not carry a stale timestamp.
+    playbook.updated_at = bumped
 
     if content_changed:
         max_version = (
@@ -219,9 +313,8 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
         )
         db.add(version)
 
-        new_graph = _parse_graph_json(payload.content_markdown)
         playbook.content_markdown = payload.content_markdown
-        playbook.graph_json = _serialize_graph(new_graph)
+        playbook.graph_json = new_graph_json
 
     if payload.title is not None:
         playbook.title = payload.title.strip()
@@ -231,7 +324,7 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
         playbook.category = payload.category
 
     if payload.tags is not None:
-        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags if name.strip()]
+        playbook.tags = [get_or_create_tag(db, name) for name in payload.tags]
 
     db.commit()
     db.refresh(playbook)
@@ -240,9 +333,10 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
 
 @router.delete("/playbooks/{playbook_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_playbook(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
-    playbook.is_deleted = True
-    db.commit()
+    # A soft delete is a write: advance the timestamp with the same
+    # compare-and-set as an edit, so neither a stale nor a concurrent writer can
+    # land a lower updated_at after it.
+    _advance_playbook(db, playbook_id, is_deleted=True)
     return None
 
 
@@ -250,12 +344,20 @@ def delete_playbook(playbook_id: int, db: Session = Depends(get_db)):
 def duplicate_playbook(playbook_id: int, db: Session = Depends(get_db)):
     playbook = _ensure_playbook(db, playbook_id)
 
+    # " (Copy)" must not push the title past the write bound.
+    suffix = " (Copy)"
+    base = playbook.title or ""
+    if len(base) + len(suffix) > PLAYBOOK_TITLE_MAX:
+        base = base[: PLAYBOOK_TITLE_MAX - len(suffix)]
+    now = utcnow()
     duplicate = Playbook(
-        title=f"{playbook.title} (Copy)",
+        title=f"{base}{suffix}",
         description=playbook.description,
         category=playbook.category,
         content_markdown=playbook.content_markdown,
         graph_json=playbook.graph_json,
+        created_at=now,
+        updated_at=now,
     )
     duplicate.tags = list(playbook.tags)
 
@@ -312,18 +414,16 @@ def get_version(playbook_id: int, version_number: int, db: Session = Depends(get
 
 @router.post("/playbooks/{playbook_id}/share", response_model=ShareResponse)
 def create_share_link(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
     token = str(uuid.uuid4())
-    playbook.share_token = token
-    db.commit()
+    # Compare-and-set, never a column ``onupdate`` or a read-modify-commit: the
+    # share must move updated_at forward even when a PUT commits concurrently.
+    _advance_playbook(db, playbook_id, share_token=token)
     return ShareResponse(share_url=f"/shared/{token}", token=token)
 
 
 @router.delete("/playbooks/{playbook_id}/share", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_share_link(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
-    playbook.share_token = None
-    db.commit()
+    _advance_playbook(db, playbook_id, share_token=None)
     return None
 
 

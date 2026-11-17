@@ -347,8 +347,12 @@ working on the same incident, as they already are across separate stdio
 processes. Every mutation names an execution/node or suggestion explicitly.
 There is no MCP-process current-run pointer, pending approval queue, deferred
 tool set, shared mutable cache, or rate limiter. State-changing tools run only
-when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true`. That switch is server
-configuration, so no tool argument or upstream text can turn it on. Each HTTP
+when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` **and** the server is
+the loopback HTTP listener (bound to `127.0.0.1` or `::1`) with its dedicated
+`HOTWASH_MCP_HTTP_TOKEN`. The stdio transport is always read-only, and the HTTP
+server refuses to start with mutations enabled on a non-loopback address, so a
+shared server cannot be talked into writing. Both switches are server
+configuration, so no tool argument or upstream text can turn them on. Each HTTP
 session gets a fresh MCP server and API client. Cancellation, suggestion
 acceptance, dismissal and the four TheHive write tools require `confirm: true`
 on every call. One client's

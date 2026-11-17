@@ -5,7 +5,13 @@ export interface HotwashConfig {
   // Byte ceiling for one backend response body. Defaults to 5 MiB.
   maxResponseBytes?: number;
   // Operator opt-in for state-changing tools. Defaults to false (read-only).
+  // On its own this does not enable writes: see writesEnabled.
   allowMutations?: boolean;
+  // Write capability. Set only by the HTTP startup path (http.ts), and only
+  // after it confirms a loopback bind (127.0.0.1 or ::1) and the dedicated
+  // HOTWASH_MCP_HTTP_TOKEN. Never read from the environment, so stdio and any
+  // shared construction stay read-only however the operator set the opt-in.
+  writesEnabled?: boolean;
   // Analyzer name -> Cortex worker id that hotwash_run_analyzer may launch.
   // Operator-controlled (HOTWASH_MCP_ANALYZER_ALLOWLIST); never taken from
   // tool arguments. Cortex launches by worker id, a per-deployment hash.

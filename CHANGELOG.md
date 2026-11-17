@@ -28,6 +28,43 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
   reads responses through a byte limit (`HOTWASH_MCP_MAX_RESPONSE_BYTES`).
   `hotwash_list_playbooks` now returns `{count, playbooks}` instead of a bare
   array, and `hotwash_list_suggestions` caps `limit` at 200.
+- `hotwash-mcp`: state-changing tools need `HOTWASH_MCP_ALLOW_MUTATIONS=true`
+  **and** the loopback HTTP listener (`127.0.0.1` or `::1`) with its dedicated
+  `HOTWASH_MCP_HTTP_TOKEN`. The stdio transport stays read-only, and a read-only
+  server does not register or list the state-changing tools at all. The HTTP
+  server decides from the address the kernel reports after binding, so
+  `HOTWASH_MCP_HTTP_HOST=localhost` works when it resolves to loopback, while an
+  IPv4-mapped `::ffff:127.0.0.1` bind is refused.
+- `PUT /api/playbooks/{id}` takes an optional `expected_updated_at`
+  precondition and returns `409` when the playbook changed since it was read.
+  The precondition check and the `updated_at` bump are one conditional UPDATE,
+  and every accepted write (including a tags-only change, which SQLAlchemy's
+  `onupdate` missed) sets `updated_at` in Python to a microsecond timestamp.
+  An edit in the same second as the read is therefore still detected, and the
+  `updated_at` a read returns round-trips exactly into the precondition.
+  `Playbook.updated_at` no longer carries a column `onupdate` at all, so no
+  write path can fall back to SQLite's whole-second `CURRENT_TIMESTAMP`: create,
+  update, duplicate, import, soft delete, share, and revoke each assign a
+  microsecond value strictly greater than the stored one, and a share or revoke
+  in the same second as an edit can no longer move `updated_at` backward past
+  it. `hotwash_update_playbook` sends the `updated_at` from its ownership read
+  and reports a conflict instead of overwriting a retagged playbook. Callers
+  that omit the field (the web UI) still get `updated_at` bumped.
+- `PlaybookCreate`, `PlaybookUpdate`, and `PlaybookImport` reject unknown fields
+  and apply the same bounds as the MCP playbook tools: title 200, description
+  8000, category 100, content 100000, and up to 18 tags of 1 to 100 characters
+  (the `Tag.name` column length). Blank and whitespace-only titles, content,
+  categories and tags are refused, so a `" "` tag can no longer clear a
+  playbook's tags. Both import routes apply the same bounds, and a duplicate's
+  ` (Copy)` suffix is truncated so the title stays within 200 characters.
+  `hotwash_update_playbook` refuses a merged tag list over 18 before sending it.
+- `POST /api/playbooks/import` accepts `content_markdown: null` when the export
+  carries a usable `graph_json` (at least one node), so a graph-only playbook
+  saved from the canvas round-trips instead of being rejected. Import never
+  truncates a historical value: a title, description, category, tag name, tag
+  count, or Markdown body above the current bound is rejected with a `422` that
+  names the field and the limit. The `PlaybookCreate` and `PlaybookUpdate`
+  bounds are unchanged.
 
 ### Added
 - MCP `hotwash_create_playbook` and `hotwash_update_playbook`: bounded Markdown
