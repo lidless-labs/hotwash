@@ -90,7 +90,7 @@ Add it to your MCP client config:
 }
 ```
 
-Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), and `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools on the loopback HTTP transport; stdio and non-loopback binds stay read-only), and `HOTWASH_MCP_ANALYZER_ALLOWLIST` (analyzer IDs `hotwash_run_analyzer` may launch, default `CIRCLHashlookup_1_1,MISP_2_1`).
+Environment variables read by the server: `HOTWASH_URL` (default `http://localhost:8000`), `HOTWASH_API_KEY` (optional, sent as the API key when the backend requires auth), `HOTWASH_TIMEOUT` (request timeout in seconds, default `30`), `HOTWASH_MCP_ALLOW_MUTATIONS` (set to `true` to enable the state-changing tools, which also requires the loopback HTTP listener: `127.0.0.1` or `::1` with `HOTWASH_MCP_HTTP_TOKEN`; stdio and non-loopback binds stay read-only and do not list them), and `HOTWASH_MCP_ANALYZER_ALLOWLIST` (analyzer IDs `hotwash_run_analyzer` may launch, default `CIRCLHashlookup_1_1,MISP_2_1`).
 
 ### Tools
 
@@ -100,6 +100,8 @@ The server registers these tools, all prefixed `hotwash_` (the investigation rea
 |------|--------------|
 | `hotwash_list_playbooks` | List playbooks in the library with optional category/tag/search filters; returns id, title, category, tags, and node count. |
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) and metadata for one playbook by id. |
+| `hotwash_create_playbook` | Create a draft playbook from Markdown; always adds the `soc-bot` and `draft` tags. Requires `confirm: true`. |
+| `hotwash_update_playbook` | Update supplied fields of a playbook already tagged `soc-bot`, preconditioned on the `updated_at` it read. Requires `confirm: true`. |
 | `hotwash_start_run` | Start a new execution of a playbook against an incident; clones nodes into per-step state and returns the execution id. |
 | `hotwash_query_run` | Get current execution state: status, the full step list with statuses/evidence/notes, and optionally the timeline. |
 | `hotwash_advance_step` | Update a single step: change status, assign an analyst, append a note, or record a decision. |
@@ -113,7 +115,7 @@ The server registers these tools, all prefixed `hotwash_` (the investigation rea
 | `hotwash_add_case_comment` | Append an internal comment (at most 8000 characters) to a case. Requires `confirm: true`. |
 | `hotwash_run_analyzer` | Launch an allowlisted Cortex analyzer (default `CIRCLHashlookup_1_1`, `MISP_2_1`) on a hash observable. Requires `confirm: true`. |
 
-State-changing tools (`hotwash_start_run`, `hotwash_advance_step`, `hotwash_attach_artifact`, `hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`, `hotwash_create_case`, `hotwash_add_case_observable`, `hotwash_add_case_comment`, `hotwash_run_analyzer`) run only when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` on the MCP server. Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) and the four TheHive write tools additionally refuse to act unless the caller passes `confirm: true`, and the API enforces the same confirmation, so a direct HTTP call cannot skip it. Results are typed, size-bounded, and mark upstream-written fields as untrusted.
+State-changing tools (`hotwash_start_run`, `hotwash_advance_step`, `hotwash_attach_artifact`, `hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`, `hotwash_create_playbook`, `hotwash_update_playbook`, `hotwash_create_case`, `hotwash_add_case_observable`, `hotwash_add_case_comment`, `hotwash_run_analyzer`) run only when the operator sets `HOTWASH_MCP_ALLOW_MUTATIONS=true` **and** the server is the loopback HTTP listener (`127.0.0.1` or `::1`) started with `HOTWASH_MCP_HTTP_TOKEN`; the stdio transport and any non-loopback bind stay read-only and do not register or list them. Destructive tools (`hotwash_cancel_run`, `hotwash_accept_suggestion`, `hotwash_dismiss_suggestion`) and the four TheHive write tools additionally refuse to act unless the caller passes `confirm: true`, and the API enforces the same confirmation, so a direct HTTP call cannot skip it. Results are typed, size-bounded, and mark upstream-written fields as untrusted.
 
 ---
 
