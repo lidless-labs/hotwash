@@ -76,7 +76,7 @@ const writeFields = {
   title: singleLine(200, 1).refine(value => value.trim().length > 0, "title must not be blank"),
   description: freeText(8000).optional(),
   category: singleLine(100).optional(),
-  tags: z.array(singleLine(128, 1).refine(value => value.trim().length > 0, "tag must not be blank")).max(18).optional(),
+  tags: z.array(singleLine(100, 1).refine(value => value.trim().length > 0, "tag must not be blank")).max(18).optional(),
   content_markdown: freeText(100000, 1).refine(value => value.trim().length > 0, "content must not be blank"),
 };
 const confirmed = z.literal(true).describe("Must be true to acknowledge the playbook write.");
@@ -106,7 +106,7 @@ export function registerPlaybookWriteTools(server: McpServer, client: HotwashCli
     } catch (error) { return fail(error); }
   });
   server.registerTool("hotwash_update_playbook", {
-    description: "Update supplied fields of a playbook already tagged soc-bot. Fetches ownership first and refuses human-authored playbooks. Preserves soc-bot on tag replacement. Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Unknown fields and empty patches are refused. Check the playbook before retrying an unconfirmed write.",
+    description: "Update supplied fields of a playbook already tagged soc-bot. Fetches ownership first and refuses human-authored playbooks. Tags are merged into the existing set: an update can add tags but never removes any (soc-bot and draft stay). Requires HOTWASH_MCP_ALLOW_MUTATIONS=true and confirm: true. Unknown fields and empty patches are refused. Check the playbook before retrying an unconfirmed write.",
     inputSchema: updateInput, annotations: mutatingTool({ destructive: true, idempotent: true }),
   }, async args => {
     const blocked = guardMutation(policy, "update this playbook");
@@ -119,8 +119,11 @@ export function registerPlaybookWriteTools(server: McpServer, client: HotwashCli
       if (target?.id !== playbook_id || !Array.isArray(target.tags) || !target.tags.some(tag => tag?.name === "soc-bot")) {
         throw new Error("Refusing update: target playbook must already carry the soc-bot tag");
       }
+      // The API replaces the tag list, so merge: an update can add tags but never drop
+      // existing ones (draft, human review markers) and always keeps soc-bot.
+      const existing = target.tags.map(tag => tag?.name).filter((name): name is string => typeof name === "string");
       const payload = { ...fields, ...(fields.tags === undefined ? {} : {
-        tags: [...new Set([...fields.tags.map(tag => tag.trim().toLowerCase().replace(/\s+/g, "-")), "soc-bot"])],
+        tags: [...new Set([...existing, ...fields.tags.map(tag => tag.trim().toLowerCase().replace(/\s+/g, "-")), "soc-bot"])],
       }) };
       const result = resultId.safeParse(await client.updatePlaybook(playbook_id, payload));
       if (!result.success || result.data.id !== playbook_id) throw new Error("Playbook write outcome not confirmed; inspect the playbook before retrying");

@@ -58,7 +58,7 @@ for (const [name, args] of calls) {
         assert.equal((await client.callTool({ name, arguments: { ...args, [field]: value } })).isError, true, field);
       }
     }
-    for (const tags of [["x".repeat(129)], Array(19).fill("a"), ["bad\n"], ["\u0000"]]) {
+    for (const tags of [["x".repeat(101)], Array(19).fill("a"), ["bad\n"], ["\u0000"]]) {
       assert.equal((await client.callTool({ name, arguments: { ...args, tags } })).isError, true);
     }
     assert.equal(seen.length, 0);
@@ -75,6 +75,15 @@ test("create posts the REST shape with deduplicated mandatory draft and ownershi
   } }]);
   assert.doesNotMatch(JSON.stringify(result), /do-not-echo/);
 });
+test("update merges tags and never drops existing draft or human tags", async () => {
+  const human = { id: 7, tags: [{ id: 1, name: "soc-bot" }, { id: 2, name: "draft" }, { id: 3, name: "reviewed-by-solomon" }] };
+  const seen = record(() => json(human));
+  const client = await connect();
+  const result = await client.callTool({ name: "hotwash_update_playbook", arguments: { playbook_id: 7, tags: ["triage"], confirm: true } });
+  assert.notEqual(result.isError, true);
+  assert.deepEqual((seen[1].body as { tags: string[] }).tags, ["soc-bot", "draft", "reviewed-by-solomon", "triage"]);
+});
+
 test("update refuses human playbooks, missing tags, mismatched ids and failed lookups", async () => {
   const client = await connect();
   for (const response of [{ id: 7, tags: [{ name: "human" }] }, { id: 7 }, { ...owned, id: 8 }, null]) {
@@ -95,7 +104,7 @@ test("update fetches first, preserves omitted fields, and forces soc-bot on tag 
     const seen = record(() => json(owned));
     assert.notEqual((await client.callTool({ name: calls[1][0], arguments: { ...update, ...extra } })).isError, true);
     assert.deepEqual(seen.map(s => [s.method, s.path]), [["GET", "/api/playbooks/7"], ["PUT", "/api/playbooks/7"]]);
-    assert.deepEqual(seen[1].body, { title: "Revised", ...(extra.tags !== undefined ? { tags: extra.tags.length ? ["reviewed", "soc-bot"] : ["soc-bot"] } : {}) });
+    assert.deepEqual(seen[1].body, { title: "Revised", ...(extra.tags !== undefined ? { tags: extra.tags.length ? ["soc-bot", "draft", "reviewed"] : ["soc-bot", "draft"] } : {}) });
     assert.equal(seen[1].redirect, "manual");
   }
 });
@@ -123,7 +132,7 @@ test("valid boundary sizes are accepted and metadata controls are refused", asyn
   const seen = record(() => json(owned));
   const result = await client.callTool({ name: calls[0][0], arguments: {
     title: "t".repeat(200), description: "d".repeat(8000), category: "c".repeat(100),
-    content_markdown: "m".repeat(100000), tags: Array.from({ length: 18 }, (_, i) => String(i).padEnd(128, "t")), confirm: true,
+    content_markdown: "m".repeat(100000), tags: Array.from({ length: 18 }, (_, i) => String(i).padEnd(100, "t")), confirm: true,
   } });
   assert.notEqual(result.isError, true);
   assert.equal(seen.length, 1);

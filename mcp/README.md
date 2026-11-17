@@ -12,7 +12,7 @@ Version 0.3.0 adds `hotwash_dismiss_suggestion`, completing the suggestion queue
 |------|---------|
 | `hotwash_list_playbooks` | Browse the library, filter by category, tag, or search |
 | `hotwash_create_playbook` | Create a bounded Markdown playbook with `soc-bot` and `draft` tags. Mutation gate and confirmation required |
-| `hotwash_update_playbook` | Update supplied fields only after fetching and verifying the target carries `soc-bot`. Preserves ownership tag |
+| `hotwash_update_playbook` | Update supplied fields only after fetching and verifying the target carries `soc-bot`. Merges tags into the existing set, so soc-bot, draft and human tags are never dropped |
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) for one playbook |
 | `hotwash_start_run` | Begin an execution from a playbook + incident title (+ optional context payload) |
 | `hotwash_query_run` | Get current run state, optionally including the timeline |
@@ -82,7 +82,7 @@ when the playbook has been reviewed. The ownership check and update are separate
 requests, so operators should avoid concurrent ownership changes.
 
 Limits: title 1 to 200 characters, description up to 8000, category up to 100,
-Markdown 1 to 100000, and up to 18 supplied tags of 1 to 128 characters each.
+Markdown 1 to 100000, and up to 18 supplied tags of 1 to 100 characters each.
 Titles, tags and categories reject control characters. Description and Markdown
 allow tabs and line breaks but reject other C0, DEL and C1 controls. Blank titles,
 Markdown and tags are refused. Tags are trimmed and lowercased, internal spaces become hyphens to match the API,
