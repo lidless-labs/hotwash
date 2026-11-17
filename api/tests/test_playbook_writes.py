@@ -607,3 +607,73 @@ def test_precondition_on_a_missing_playbook_is_404(client, temp_db, api_key):
         json={"title": "Renamed", "expected_updated_at": "2026-01-01T00:00:00"},
     )
     assert resp.status_code == 404
+
+
+# --- Concurrent writers (Daybreak Blue review of d91ef7d) -------------------
+# share, revoke and soft delete used to read updated_at, compute the next value
+# and commit later; a PUT committing in between could be overwritten by the
+# older timestamp. These stage that interleaving deterministically: the first
+# time the route computes its next timestamp, a separate session commits a
+# newer one, exactly as a concurrent PUT would.
+
+
+def _interleave_newer_write(monkeypatch, temp_db, playbook_id, times=1):
+    from datetime import timedelta
+
+    from api.orm_models import Playbook
+    from api.routers import playbooks as router_module
+
+    real_next = router_module.next_updated_at
+    state = {"left": times, "committed": []}
+
+    def racing_next(stored):
+        if state["left"] > 0:
+            state["left"] -= 1
+            with temp_db() as other:
+                row = other.get(Playbook, playbook_id)
+                newer = router_module.next_updated_at.__wrapped__(row.updated_at) + timedelta(seconds=5)
+                row.updated_at = newer
+                other.commit()
+                state["committed"].append(newer)
+        return real_next(stored)
+
+    racing_next.__wrapped__ = real_next
+    monkeypatch.setattr(router_module, "next_updated_at", racing_next)
+    return state
+
+
+def _stored_updated_at(temp_db, playbook_id):
+    from api.orm_models import Playbook
+
+    with temp_db() as session:
+        return session.get(Playbook, playbook_id).updated_at
+
+
+@pytest.mark.parametrize(
+    "method,suffix",
+    [("post", "/share"), ("delete", "/share"), ("delete", "")],
+    ids=["share", "revoke", "soft-delete"],
+)
+def test_a_concurrent_write_never_rolls_updated_at_back(monkeypatch, client, temp_db, api_key, method, suffix):
+    playbook_id = _create(client, api_key).json()["id"]
+    if suffix == "/share" and method == "delete":
+        assert client.post(f"/api/playbooks/{playbook_id}/share", headers=_headers(api_key)).status_code == 200
+
+    state = _interleave_newer_write(monkeypatch, temp_db, playbook_id)
+    resp = getattr(client, method)(f"/api/playbooks/{playbook_id}{suffix}", headers=_headers(api_key))
+    assert resp.status_code in (200, 204)
+
+    concurrent = state["committed"][0]
+    final = _stored_updated_at(temp_db, playbook_id)
+    assert final > concurrent, f"write went backward: concurrent {concurrent} -> final {final}"
+
+
+def test_persistent_contention_is_a_409_not_a_lost_write(monkeypatch, client, temp_db, api_key):
+    from api.routers import playbooks as router_module
+
+    playbook_id = _create(client, api_key).json()["id"]
+    state = _interleave_newer_write(monkeypatch, temp_db, playbook_id, times=router_module._ADVANCE_ATTEMPTS)
+    resp = client.post(f"/api/playbooks/{playbook_id}/share", headers=_headers(api_key))
+    assert resp.status_code == 409
+    # The last concurrent write stands untouched: nothing older replaced it.
+    assert _stored_updated_at(temp_db, playbook_id) == state["committed"][-1]

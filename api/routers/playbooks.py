@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import String, cast, desc, func, or_, update
+from sqlalchemy import String, cast, desc, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from api.auth import get_api_key
@@ -137,6 +137,45 @@ def _matches_updated_at(expected: datetime):
             cast(Playbook.updated_at, String) == expected.strftime("%Y-%m-%d %H:%M:%S")
         )
     return or_(*matches)
+
+
+# Bounded retries for a compare-and-set write that lost a race. Each retry
+# starts a fresh transaction, so it reads the version the other writer committed.
+_ADVANCE_ATTEMPTS = 8
+
+
+def _advance_playbook(db: Session, playbook_id: int, **values: Any) -> datetime:
+    """Apply ``values`` and move ``updated_at`` strictly forward in one write.
+
+    Share, revoke and soft delete used to read the stored timestamp, compute the
+    next one in Python and commit later. A concurrent PUT committing in between
+    could then be overwritten by an older timestamp, which reopened the #46
+    precondition race. This writes only if ``updated_at`` still equals the value
+    just read (the same conditional UPDATE the edit path uses), and re-reads and
+    retries when another writer got there first.
+    """
+    for _ in range(_ADVANCE_ATTEMPTS):
+        current = db.execute(
+            select(Playbook.updated_at).where(Playbook.id == playbook_id, Playbook.is_deleted.is_(False))
+        ).scalar_one_or_none()
+        if current is None:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="Playbook not found")
+        bumped = next_updated_at(current)
+        result = db.execute(
+            update(Playbook)
+            .where(Playbook.id == playbook_id, _matches_updated_at(as_naive_utc(current)))
+            .values(updated_at=bumped, **values)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            db.commit()
+            return bumped
+        db.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Playbook is being changed by another request; retry",
+    )
 
 
 @router.post("/playbooks", response_model=PlaybookDetail, status_code=status.HTTP_201_CREATED)
@@ -294,12 +333,10 @@ def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: Session = Dep
 
 @router.delete("/playbooks/{playbook_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_playbook(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
-    playbook.is_deleted = True
-    # A soft delete is a write: advance the timestamp exactly like an edit so a
-    # stale read-then-write caller cannot land after it.
-    playbook.updated_at = next_updated_at(playbook.updated_at)
-    db.commit()
+    # A soft delete is a write: advance the timestamp with the same
+    # compare-and-set as an edit, so neither a stale nor a concurrent writer can
+    # land a lower updated_at after it.
+    _advance_playbook(db, playbook_id, is_deleted=True)
     return None
 
 
@@ -377,22 +414,16 @@ def get_version(playbook_id: int, version_number: int, db: Session = Depends(get
 
 @router.post("/playbooks/{playbook_id}/share", response_model=ShareResponse)
 def create_share_link(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
     token = str(uuid.uuid4())
-    playbook.share_token = token
-    # Set the timestamp here rather than leaning on a column ``onupdate``: the
-    # share must move updated_at forward, never back to a whole second.
-    playbook.updated_at = next_updated_at(playbook.updated_at)
-    db.commit()
+    # Compare-and-set, never a column ``onupdate`` or a read-modify-commit: the
+    # share must move updated_at forward even when a PUT commits concurrently.
+    _advance_playbook(db, playbook_id, share_token=token)
     return ShareResponse(share_url=f"/shared/{token}", token=token)
 
 
 @router.delete("/playbooks/{playbook_id}/share", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_share_link(playbook_id: int, db: Session = Depends(get_db)):
-    playbook = _ensure_playbook(db, playbook_id)
-    playbook.share_token = None
-    playbook.updated_at = next_updated_at(playbook.updated_at)
-    db.commit()
+    _advance_playbook(db, playbook_id, share_token=None)
     return None
 
 
