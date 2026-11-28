@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """Tests for the SSRF DNS-rebinding fix: resolve once, validate, pin the IP."""
 
 from __future__ import annotations
