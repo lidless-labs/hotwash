@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """Tests for HOTWASH_PRIVATE_HOST_ALLOWLIST env handling in security.validate_integration_url."""
 
 from __future__ import annotations
