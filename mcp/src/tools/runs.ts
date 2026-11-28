@@ -52,11 +52,11 @@ function recordedEvidence(evidence: ExecutionEvidence & { connector?: unknown; a
 
 export function registerRunTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
   server.registerTool("hotwash_list_runs", {
-    description: "List existing runs newest first by start time. Optional status and playbook filters; limit 1 to 500, default 50. This inventory does not establish finding identity; never starts or advances a run.",
+    description: "List existing runs newest first by start time. Optional status and playbook filters; limit 1 to 200, default 50. This inventory does not establish finding identity; never starts or advances a run.",
     inputSchema: z.object({
       status: z.enum(["active", "paused", "completed", "abandoned"]).optional(),
       playbook_id: z.number().int().positive().optional(),
-      limit: z.number().int().min(1).max(500).default(50),
+      limit: z.number().int().min(1).max(200).default(50),
     }).strict(), annotations: READ_ONLY_TOOL,
   }, async ({ limit, ...filters }) => {
     try {

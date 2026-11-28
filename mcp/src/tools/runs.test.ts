@@ -94,7 +94,7 @@ for (const mode of ["stdio", "http"] as const) {
     const properties = registered[0].inputSchema.properties as Record<string, Record<string, unknown>>;
     assert.deepEqual(properties.status.enum, ["active", "paused", "completed", "abandoned"]);
     assert.equal(properties.limit.minimum, 1);
-    assert.equal(properties.limit.maximum, 500);
+    assert.equal(properties.limit.maximum, 200);
     assert.equal(properties.limit.default, 50);
     assert.deepEqual(seen, []);
 
@@ -106,11 +106,11 @@ for (const mode of ["stdio", "http"] as const) {
 
     data(await client.callTool({ name: "hotwash_list_runs", arguments: { status: "active", limit: 5 } }));
     assert.deepEqual(seen.splice(0), ["GET /api/executions?status=active&limit=5"]);
-    data(await client.callTool({ name: "hotwash_list_runs", arguments: { playbook_id: 7, limit: 500 } }));
-    assert.deepEqual(seen.splice(0), ["GET /api/executions?playbook_id=7&limit=500"]);
+    data(await client.callTool({ name: "hotwash_list_runs", arguments: { playbook_id: 7, limit: 200 } }));
+    assert.deepEqual(seen.splice(0), ["GET /api/executions?playbook_id=7&limit=200"]);
 
     for (const args of [
-      { status: "invalid" }, { status: "in_progress" }, { limit: 0 }, { limit: 501 },
+      { status: "invalid" }, { status: "in_progress" }, { limit: 0 }, { limit: 201 },
       { limit: 1.5 }, { limit: "5" }, { playbook_id: 0 }, { playbook_id: 1.5 }, { offset: 1 },
     ]) {
       assert.equal((await client.callTool({ name: "hotwash_list_runs", arguments: args })).isError, true);

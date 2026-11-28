@@ -6,7 +6,7 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 ## [Unreleased]
 
 ### Changed
-- `hotwash_list_runs` accepts limits from 1 to 500 (default 50), sends the
+- `hotwash_list_runs` accepts limits from 1 to 200 (default 50), sends the
   exact requested limit to the existing executions API, and preserves its
   newest-first order. Full inventories report `inventory_limit_reached`
   instead of fetching a sentinel. Public-entry tests cover stdio and

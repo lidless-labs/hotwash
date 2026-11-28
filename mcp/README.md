@@ -16,13 +16,14 @@ Version 0.3.0 adds `hotwash_dismiss_suggestion`, completing the suggestion queue
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) for one playbook |
 | `hotwash_start_run` | Begin an execution from a playbook + incident title (+ optional context payload) |
 | `hotwash_query_run` | Get current run state, optionally including the timeline |
-| `hotwash_list_runs` | List existing runs newest first, with optional status/playbook filters and limit 1 to 500 (default 50) |
+| `hotwash_list_runs` | List existing runs newest first, with optional status/playbook filters and limit 1 to 200 (default 50) |
 | `hotwash_get_run_report` | Read the existing JSON report for a known run |
 | `hotwash_list_cases` | Read one finite TheHive case inventory page |
 | `hotwash_get_case` | Read selected fields for a known TheHive case ID |
 | `hotwash_list_case_observables` | Read case-scoped complete hashes and file paths |
 | `hotwash_list_case_comments` | Read existing internal-comment evidence |
 | `hotwash_get_analyzer_job` | Read known job status and selected report evidence without launching |
+| `hotwash_check_finding` | Check one Wazuh SHA-256 finding candidate against existing TheHive cases and local runs, read-only; identity stays unverified |
 | `hotwash_create_case` | Create one triage case: severity 1 to 2, TLP/PAP at most AMBER, `soc-bot` tag always added (mutation gate and `confirm: true`) |
 | `hotwash_add_case_observable` | Add a complete md5/sha1/sha256 hash or a file path to a case (mutation gate and `confirm: true`) |
 | `hotwash_add_case_comment` | Append an internal comment of at most 8000 characters to a case (mutation gate and `confirm: true`) |
@@ -104,7 +105,7 @@ TheHive IDs begin with `~`, contain only alphanumerics after it and are at most
 128 characters. Case lists and relations accept `offset` (0 to 10000) and `limit`
 (1 to 100, default 50). Each invocation fetches one source page plus a sentinel.
 Run inventory accepts optional `status` (`active`, `paused`, `completed`,
-`abandoned`), a positive integer `playbook_id` and integer `limit` (1 to 500,
+`abandoned`), a positive integer `playbook_id` and integer `limit` (1 to 200,
 default 50). It sends exactly one `GET /api/executions` with the requested
 limit and preserves the API's newest-first order by `started_at`. Each `runs`
 entry contains `id`, `incident_title`, `incident_id`, `playbook_title`,
