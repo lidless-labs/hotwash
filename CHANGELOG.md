@@ -6,6 +6,11 @@ version line (`mcp-v*` tags); entries here cover the whole repo.
 ## [Unreleased]
 
 ### Changed
+- `hotwash_list_runs` accepts limits from 1 to 200 (default 50), sends the
+  exact requested limit to the existing executions API, and preserves its
+  newest-first order. Full inventories report `inventory_limit_reached`
+  instead of fetching a sentinel. Public-entry tests cover stdio and
+  Streamable HTTP with a local backend fixture.
 - Wazuh `run_active_response` is closed by default: it needs a nonempty
   `HOTWASH_WAZUH_AR_COMMANDS` allow-list (`403` otherwise), `"confirm": true`
   on every request, and supports `"dry_run": true`.

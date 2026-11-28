@@ -92,20 +92,21 @@ test("truncated report text downgrades coverage and retains known IDs", async ()
   assert.ok(data._truncated);
 });
 
-test("run inventory uses a sentinel and run reports omit raw connector dictionaries", async () => {
+test("run inventory sends the exact limit and run reports omit raw connector dictionaries", async () => {
   const urls: string[] = [];
   globalThis.fetch = async url => {
     urls.push(String(url));
     if (String(url).includes("/report")) return json({ execution: summary, metrics: {}, timeline: [],
       steps: [{ node_id: "step", status: "completed", notes: [], evidence: [{ filename: "result.json", result: { raw: { token: "secret" } } }] }] });
-    return json([summary, { ...summary, id: 8 }]);
+    return json([summary]);
   };
   const client = await connect();
   const inventory = await client.callTool({ name: "hotwash_list_runs", arguments: { limit: 1 } });
   const data = readData(inventory);
   assert.equal(data.returned, 1);
-  assert.equal(data.has_more, true);
-  assert.match(urls[0], /limit=2/);
+  assert.ok(data.gaps.includes("inventory_limit_reached"));
+  assert.equal(data.has_more, undefined);
+  assert.equal(urls[0], "http://example.invalid/api/executions?limit=1");
   const report = await client.callTool({ name: "hotwash_get_run_report", arguments: { execution_id: 7 } });
   assert.notEqual(report.isError, true);
   assert.doesNotMatch(JSON.stringify(report), /secret|token|"raw"/);
