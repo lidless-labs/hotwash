@@ -121,8 +121,9 @@ results use a sentinel; `has_more: false` means none was observed, with query
 semantics and visibility still unverified. Run inventory returns `runs`,
 `returned` and `limit` without a sentinel or pagination offsets. A full run
 result adds `inventory_limit_reached` to `gaps`; whether more runs exist is
-unknown. Existing output bounds still apply, so a large request can return
-fewer rows with explicit truncation metadata.
+unknown. The 200 limit matches the per-array output bound, so every requested
+row is returned. Long text fields can still be shortened, and a result over
+the output size limit fails with a request to narrow it.
 `returned` counts projected rows. A relation can omit unsupported types or
 non-internal comments and report the gap. MCP output cuts set
 `coverage: "incomplete"`, add `mcp_output_truncated` and retain `_truncated`.
