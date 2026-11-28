@@ -52,20 +52,21 @@ function recordedEvidence(evidence: ExecutionEvidence & { connector?: unknown; a
 
 export function registerRunTools(server: McpServer, client: HotwashClient, policy?: ToolPolicy): void {
   server.registerTool("hotwash_list_runs", {
-    description: "Read a bounded inventory of existing runs. This is not authoritative finding dedup. Fetches one extra row to report overflow; never starts or advances a run.",
+    description: "List existing runs newest first by start time. Optional status and playbook filters; limit 1 to 500, default 50. This inventory does not establish finding identity; never starts or advances a run.",
     inputSchema: z.object({
       status: z.enum(["active", "paused", "completed", "abandoned"]).optional(),
       playbook_id: z.number().int().positive().optional(),
-      limit: z.number().int().min(1).max(100).default(50),
+      limit: z.number().int().min(1).max(500).default(50),
     }).strict(), annotations: READ_ONLY_TOOL,
   }, async ({ limit, ...filters }) => {
     try {
-      const rows = await client.listRuns({ ...filters, limit: limit + 1 });
-      if (!Array.isArray(rows) || rows.length > limit + 1) throw new Error("Invalid run inventory");
-      const runs = rows.slice(0, limit).map(runSummary);
-      return readResult({ runs, returned: runs.length, limit, has_more: rows.length > limit,
-        overflow: rows.length > limit, observed_at: new Date().toISOString(), coverage: "unverified",
-        gaps: ["inventory_only", "identity_unbound", ...(rows.length > limit ? ["overflow"] : [])] });
+      const rows = await client.listRuns({ ...filters, limit });
+      if (!Array.isArray(rows) || rows.length > limit) throw new Error("Invalid run inventory");
+      // The existing REST route orders by started_at descending. Preserve it.
+      const runs = rows.map(runSummary);
+      return readResult({ runs, returned: runs.length, limit,
+        observed_at: new Date().toISOString(), coverage: "unverified",
+        gaps: ["inventory_only", "identity_unbound", ...(rows.length === limit ? ["inventory_limit_reached"] : [])] });
     } catch { return fail(new Error("Hotwash read failed; run inventory unavailable")); }
   });
 

@@ -94,7 +94,9 @@ Environment variables read by the server: `HOTWASH_URL` (default `http://localho
 
 ### Tools
 
-The server registers these tools, all prefixed `hotwash_` (the investigation read tools are listed in [`mcp/README.md`](mcp/README.md)):
+The server registers 12 read-only tools by default and 24 tools when mutations
+are enabled on loopback HTTP. All are prefixed `hotwash_` (the remaining
+investigation read tools are listed in [`mcp/README.md`](mcp/README.md)):
 
 | Tool | What it does |
 |------|--------------|
@@ -102,6 +104,7 @@ The server registers these tools, all prefixed `hotwash_` (the investigation rea
 | `hotwash_get_playbook` | Fetch the full graph (nodes + edges) and metadata for one playbook by id. |
 | `hotwash_create_playbook` | Create a draft playbook from Markdown; always adds the `soc-bot` and `draft` tags. Requires `confirm: true`. |
 | `hotwash_update_playbook` | Update supplied fields of a playbook already tagged `soc-bot`, preconditioned on the `updated_at` it read. Requires `confirm: true`. |
+| `hotwash_list_runs` | Read existing runs newest first by start time, filtered by optional status and playbook id; limit 1 to 500, default 50. Returns incident and playbook titles and ids, status, step counts, and start/completion timestamps. |
 | `hotwash_start_run` | Start a new execution of a playbook against an incident; clones nodes into per-step state and returns the execution id. |
 | `hotwash_query_run` | Get current execution state: status, the full step list with statuses/evidence/notes, and optionally the timeline. |
 | `hotwash_advance_step` | Update a single step: change status, assign an analyst, append a note, or record a decision. |
